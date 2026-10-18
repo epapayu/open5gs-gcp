@@ -1,0 +1,94 @@
+# ==============================================================================
+# 00-namespace-and-networks.yaml
+# GKE Namespace & Dataplane V2 Multi-Network CRDs (N2, N3, N4, N6)
+# ==============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+---
+# N2 Interface Network (NGAP over SCTP :38412)
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: n2-signaling-params
+spec:
+  vpc: vpc-n2-signaling
+  vpcSubnet: subnet-n2
+  deviceMode: NetDevice
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: n2-signaling-net
+spec:
+  type: L3
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: n2-signaling-params
+---
+# N3 Interface Network (GTP-U User Plane over UDP :2152 - MTU 8896)
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: n3-userplane-params
+spec:
+  vpc: vpc-n3-userplane
+  vpcSubnet: subnet-n3
+  deviceMode: NetDevice
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: n3-userplane-net
+spec:
+  type: L3
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: n3-userplane-params
+---
+# N4 Interface Network (PFCP over UDP :8805 - MTU 8896)
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: n4-pfcp-params
+spec:
+  vpc: vpc-n4-pfcp
+  vpcSubnet: subnet-n4
+  deviceMode: NetDevice
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: n4-pfcp-net
+spec:
+  type: L3
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: n4-pfcp-params
+---
+# N6 Interface Network (External Data Network / Internet Breakout)
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: n6-dn-params
+spec:
+  vpc: vpc-n6-dn
+  vpcSubnet: subnet-n6
+  deviceMode: NetDevice
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: n6-dn-net
+spec:
+  type: L3
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: n6-dn-params

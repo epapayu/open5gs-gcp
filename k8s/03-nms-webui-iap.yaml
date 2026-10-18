@@ -1,0 +1,107 @@
+# ==============================================================================
+# 03-nms-webui-iap.yaml
+# Network Management System (NMS) - Open5GS WebUI
+# Secured via Google Cloud External ALB + Cloud Armor + Identity-Aware Proxy (IAP)
+# Connected to Cloud Firestore (MongoDB Compat) & Cloud Memorystore (Valkey/Redis)
+# ==============================================================================
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: open5gs-webui-iap-config
+  namespace: open5gs
+spec:
+  iap:
+    enabled: true
+    oauthclientCredentials:
+      secretName: open5gs-iap-oauth-secret
+  securityPolicy:
+    name: "open5gs-nms-cloud-armor-policy"
+  healthCheck:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    type: HTTP
+    port: 9999
+    requestPath: /
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-webui-svc
+  namespace: open5gs
+  annotations:
+    cloud.google.com/backend-config: '{"default": "open5gs-webui-iap-config"}'
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  selector:
+    app: open5gs-webui
+  ports:
+    - name: http-webui
+      port: 9999
+      targetPort: 9999
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-webui
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    app: open5gs-webui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: open5gs-webui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        app: open5gs-webui
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: webui
+          image: ghcr.io/open5gs/open5gs-webui:v2.7.2
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri
+            - name: REDIS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-redis-secret
+                  key: redis_uri
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "9999"
+          ports:
+            - containerPort: 9999
+              name: http-webui
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: open5gs-nms-ingress
+  namespace: open5gs
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    networking.gke.io/managed-certificates: "open5gs-nms-managed-cert"
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  defaultBackend:
+    service:
+      name: open5gs-webui-svc
+      port:
+        number: 9999

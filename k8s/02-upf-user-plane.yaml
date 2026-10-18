@@ -1,0 +1,106 @@
+# ==============================================================================
+# 02-upf-user-plane.yaml
+# Open5GS User Plane Function (UPF) with GKE Dataplane V2 Multi-NIC
+# Interfaces:
+#   - eth0 : Management & Prometheus Telemetry (:9090)
+#   - net1 : N3 GTP-U User Plane (:2152/UDP, MTU 8896)
+#   - net2 : N4 PFCP Control Plane (:8805/UDP, MTU 8896)
+#   - net3 : N6 External Data Network Breakout (via Cloud NAT)
+#   - ogstun : Kernel TUN interface for UE Pool (10.45.0.0/16)
+# ==============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: open5gs-upf
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: upf
+spec:
+  serviceName: open5gs-upf
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: upf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: upf
+        metrics: enabled
+      annotations:
+        networking.gke.io/interfaces: |
+          [
+            {"interfaceName":"eth0","network":"default"},
+            {"interfaceName":"net1","network":"n3-userplane-net"},
+            {"interfaceName":"net2","network":"n4-pfcp-net"},
+            {"interfaceName":"net3","network":"n6-dn-net"}
+          ]
+    spec:
+      nodeSelector:
+        5g-plane: multinic-dataplane
+      initContainers:
+        - name: setup-ogstun-and-nat
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -ex
+              ip tuntap add name ogstun mode tun || true
+              ip addr add 10.45.0.1/16 dev ogstun || true
+              ip link set ogstun mtu 1400
+              ip link set ogstun up
+              sysctl -w net.ipv4.ip_forward=1
+              iptables -t nat -A POSTROUTING -s 10.45.0.0/16 -o net3 -j MASQUERADE
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+                - SYS_ADMIN
+      containers:
+        - name: upfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-upfd", "-c", "/etc/open5gs/upf.yaml"]
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          ports:
+            - containerPort: 2152
+              name: n3-gtpu
+              protocol: UDP
+            - containerPort: 8805
+              name: n4-pfcp
+              protocol: UDP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "4000m"
+              memory: "4Gi"
+            limits:
+              cpu: "6000m"
+              memory: "8Gi"
+          volumeMounts:
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
+      volumes:
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+---
+# PodDisruptionBudget to protect active GTP-U user plane sessions during maintenance
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: open5gs-upf-pdb
+  namespace: open5gs
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      nf: upf

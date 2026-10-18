@@ -1,0 +1,63 @@
+# ==============================================================================
+# .gitignore - Open5GS on Google Cloud Platform (GCP) Blueprint Repository
+# Excludes sensitive credentials, SIM cryptographic keys, Terraform state,
+# certificates, and local environment files.
+# ==============================================================================
+
+# 1. Terraform State, Plans, and Sensitive Variables
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# 2. Google Cloud & Kubernetes Credentials / Secrets
+*service-account*.json
+*credentials*.json
+*gcp-key*.json
+gcp_config.txt
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+*secret*.yaml
+*secrets*.yaml
+!k8s/0*-*.yaml
+
+# 3. 5G Core Cryptographic Keys, SIM Profiles (Ki/OPc), & TLS/mTLS Certificates
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+*.jks
+*subscriber*dump*
+*imsi*export*
+*.pcap
+*.pcapng
+
+# 4. Environment & Local Configuration Overrides
+.env
+.env.*
+*.local
+*.bak
+*.swp
+*~
+
+# 5. OS, IDE, & Runtime Artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+node_modules/

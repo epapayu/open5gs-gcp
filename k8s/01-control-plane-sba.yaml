@@ -1,0 +1,444 @@
+# ==============================================================================
+# 01-control-plane-sba.yaml
+# Open5GS 5G Standalone (5G SA) Service-Based Architecture (SBA) Control Plane
+# Includes: NRF, SCP, UDR, UDM, AUSF, PCF, NSSF, BSF, SEPP, AMF (Multi-NIC),
+#           SMF (Multi-NIC), and Google Cloud Managed Prometheus PodMonitoring
+# ==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-common-env
+  namespace: open5gs
+data:
+  PLMN_MCC: "999"
+  PLMN_MNC: "70"
+  TAC: "1"
+  NRF_SBI_URI: "http://open5gs-nrf.open5gs.svc.cluster.local:7777"
+  SCP_SBI_URI: "http://open5gs-scp.open5gs.svc.cluster.local:7777"
+---
+# 1. NRF (NF Repository Function)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-nrf
+  namespace: open5gs
+spec:
+  selector:
+    nf: nrf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-nrf
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: nrf
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: nrf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: nrf
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: nrfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-nrfd", "-c", "/etc/open5gs/nrf.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+---
+# 2. SCP (Service Communication Proxy)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-scp
+  namespace: open5gs
+spec:
+  selector:
+    nf: scp
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-scp
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: scp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: scp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: scp
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: scpd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-scpd", "-c", "/etc/open5gs/scp.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+---
+# 3. UDR (Unified Data Repository - Connected to Cloud Firestore MongoDB Compat)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-udr
+  namespace: open5gs
+spec:
+  selector:
+    nf: udr
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-udr
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: udr
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: udr
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: udr
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: udrd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-udrd", "-c", "/etc/open5gs/udr.yaml"]
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri
+          ports:
+            - containerPort: 7777
+              name: sbi
+---
+# 4. UDM (Unified Data Management) & AUSF (Authentication Server Function)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-udm
+  namespace: open5gs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: udm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: udm
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: udmd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-udmd", "-c", "/etc/open5gs/udm.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-ausf
+  namespace: open5gs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: ausf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: ausf
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: ausfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-ausfd", "-c", "/etc/open5gs/ausf.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+---
+# 5. PCF (Policy Control Function), NSSF (Slice Selection), BSF (Binding), SEPP (Roaming)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-pcf
+  namespace: open5gs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: pcf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: pcf
+        metrics: enabled
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: pcfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-pcfd", "-c", "/etc/open5gs/pcf.yaml"]
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri
+          ports:
+            - containerPort: 7777
+              name: sbi
+            - containerPort: 9090
+              name: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-nssf
+  namespace: open5gs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: nssf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: nssf
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: nssfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-nssfd", "-c", "/etc/open5gs/nssf.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-bsf
+  namespace: open5gs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: bsf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: bsf
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: bsfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-bsfd", "-c", "/etc/open5gs/bsf.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-sepp
+  namespace: open5gs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: sepp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: sepp
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: seppd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-seppd", "-c", "/etc/open5gs/sepp.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+            - containerPort: 7778
+              name: n32-prins
+---
+# 6. AMF (Access and Mobility Management Function - Multi-NIC: eth0=SBI, net1=N2 SCTP)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: open5gs-amf
+  namespace: open5gs
+spec:
+  serviceName: open5gs-amf
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: amf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: amf
+        metrics: enabled
+      annotations:
+        networking.gke.io/interfaces: |
+          [
+            {"interfaceName":"eth0","network":"default"},
+            {"interfaceName":"net1","network":"n2-signaling-net"}
+          ]
+    spec:
+      nodeSelector:
+        5g-plane: multinic-dataplane
+      containers:
+        - name: amfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-amfd", "-c", "/etc/open5gs/amf.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+              protocol: TCP
+            - containerPort: 38412
+              name: n2-ngap-sctp
+              protocol: SCTP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+---
+# 7. SMF (Session Management Function - Multi-NIC: eth0=SBI, net1=N4 PFCP)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: open5gs-smf
+  namespace: open5gs
+spec:
+  serviceName: open5gs-smf
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: smf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: smf
+        metrics: enabled
+      annotations:
+        networking.gke.io/interfaces: |
+          [
+            {"interfaceName":"eth0","network":"default"},
+            {"interfaceName":"net1","network":"n4-pfcp-net"}
+          ]
+    spec:
+      nodeSelector:
+        5g-plane: multinic-dataplane
+      containers:
+        - name: smfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-smfd", "-c", "/etc/open5gs/smf.yaml"]
+          ports:
+            - containerPort: 7777
+              name: sbi
+              protocol: TCP
+            - containerPort: 8805
+              name: n4-pfcp
+              protocol: UDP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+---
+# 8. Google Cloud Managed Service for Prometheus (GMP) Scraping CRD
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: open5gs-nf-metrics
+  namespace: open5gs
+spec:
+  selector:
+    matchLabels:
+      metrics: enabled
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics

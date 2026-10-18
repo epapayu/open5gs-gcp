@@ -128,16 +128,23 @@ resource "google_compute_router_nat" "n6_nat" {
 }
 
 # ------------------------------------------------------------------------------
-# 2. 3GPP Protocol Firewall Rules (SCTP N2, GTP-U N3, PFCP N4)
+# 2. 3GPP Protocol Firewall Rules (N2/S1-MME SCTP, N3/S1-U GTP-U, N4/Sxa PFCP, GTPv2-C)
 # ------------------------------------------------------------------------------
 
-resource "google_compute_firewall" "allow_n2_sctp" {
-  name    = "allow-n2-ngap-sctp"
+resource "google_compute_firewall" "allow_n2_s1mme_sctp" {
+  name    = "allow-n2-s1mme-sctp"
   network = google_compute_network.vpc_n2.name
 
   allow {
     protocol = "sctp"
-    ports    = ["38412"]
+    # 38412 = 5G N2 NGAP, 36412 = 4G S1-MME S1AP, 29118 = SGsAP
+    ports = ["38412", "36412", "29118"]
+  }
+
+  allow {
+    protocol = "udp"
+    # 2123 = GTPv2-C (N26 AMF<->MME, S11 MME<->SGW-C, S5c SGW-C<->SMF/PGW-C)
+    ports = ["2123"]
   }
 
   source_ranges = [var.ran_cidr, "10.20.0.0/24"]

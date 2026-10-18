@@ -8,34 +8,39 @@ This repository provides a **Principal Architect Reference Blueprint**, **Terraf
 
 ```mermaid
 flowchart LR
-    RAN["5G gNodeB / UERANSIM"] <-->|"N2 (SCTP :38412)<br/>N3 (GTP-U :2152)"| VPN["Cloud Interconnect /<br/>HA VPN"]
+    RAN["5G gNodeB / 4G eNodeB /<br/>UERANSIM"] <-->|"N2 / S1-MME (SCTP)<br/>N3 / S1-U (GTP-U)"| VPN["Cloud Interconnect /<br/>HA VPN"]
 
     subgraph GKE_Cluster["GKE Standard Regional Cluster (Dataplane V2 + Multi-Networking)"]
-        CP["SBA Control Plane NFs<br/>(NRF, SCP, AMF, SMF, AUSF,<br/>UDM, UDR, PCF, NSSF, BSF, SEPP)"]
-        UPF["Dedicated User Plane (UPF)<br/>(c3-standard-8 + gVNIC + ogstun)"]
-        WebUI["Open5GS WebUI (NMS)<br/>(:9999 behind IAP & Cloud Armor)"]
+        CP["5G SBA Control Plane NFs<br/>(NRF, SCP, AMF, SMF/PGW-C, AUSF,<br/>UDM, UDR, PCF, NSSF, BSF, SEPP)"]
+        EPC["4G EPC CUPS & N26 Interworking<br/>(MME, HSS, PCRF, SGW-C, SGW-U)"]
+        UPF["Dedicated User Plane (UPF/PGW-U)<br/>(c3-standard-8 + gVNIC + ogstun)"]
+        WebUI["Open5GS WebUI & open5gs-dbctl<br/>(:9999 behind IAP & Cloud Armor)"]
+        CP <-->|"N26 / S5c / Gx"| EPC
         CP <-->|"N4 (PFCP :8805)"| UPF
+        EPC <-->|"S5u / Sxa"| UPF
     end
 
-    VPN <-->|"N2 NGAP (SCTP)"| CP
-    VPN <-->|"N3 GTP-U (UDP)"| UPF
+    VPN <-->|"N2 / S1-MME (SCTP)"| CP
+    VPN <-->|"N3 / S1-U (GTP-U)"| UPF
 
     CP <-->|"MongoDB Wire Protocol"| Firestore[("Cloud Firestore Enterprise<br/>(MongoDB Compatibility)")]
+    EPC <-->|"MongoDB Wire Protocol"| Firestore
     WebUI <-->|"MongoDB Wire Protocol"| Firestore
     WebUI <-->|"Session & Telemetry Cache"| Memorystore[("Cloud Memorystore<br/>(Valkey / Redis)")]
-    UPF -->|"N6 Breakout"| NAT["Cloud NAT /<br/>External Data Network"]
+    UPF -->|"N6 / SGi Breakout"| NAT["Cloud NAT /<br/>External Data Network"]
     CP -.->|"libogsmetrics (:9090)"| GMP["Google Cloud Managed<br/>Service for Prometheus"]
     UPF -.->|"libogsmetrics (:9090)"| GMP
 ```
 
-### Key GCP Native Service Mappings
-| 5GS Layer | Open5GS Component | Google Cloud Native Service |
+### Key GCP Native Service Mappings (100% Open5GS Component Coverage)
+| 5GS / EPC Layer | Open5GS Component & Daemons | Google Cloud Native Service |
 | :--- | :--- | :--- |
-| **Control Plane (SBA)** | `NRF`, `SCP`, `AMF`, `SMF`, `AUSF`, `UDM`, `UDR`, `PCF`, `NSSF`, `BSF`, `SEPP` | **GKE Standard** (`Dataplane V2` + HTTP/2 Services + Multi-NIC for `N2`/`N4`) |
-| **User Plane (CUPS)** | `UPF` (`open5gs-upfd` + `ogstun` kernel TUN) | **GKE Standard C3 Node Pool** (`c3-standard-8`, `gVNIC`, Multi-NIC `N3`/`N4`/`N6` with `MTU 8896`, **Cloud NAT**) |
-| **Subscriber & Policy DB** | MongoDB (`udrd`, `pcfd`, `webui`) | **Cloud Firestore Enterprise with MongoDB Compatibility** *(or MongoDB Atlas on GCP)* |
+| **5GC Control Plane (SBA)** | `NRF`, `SCP`, `AMF`, `SMF` (`+PGW-C`), `AUSF`, `UDM`, `UDR`, `PCF`, `NSSF`, `BSF`, `SEPP` | **GKE Standard** (`Dataplane V2` + HTTP/2 Services + Multi-NIC for `N2`/`N4`/`N26`) |
+| **5GC & EPC User Plane (CUPS)** | `UPF` (`+PGW-U` `open5gs-upfd` + `ogstun`) & `SGW-U` (`open5gs-sgwud`) | **GKE Standard C3 Node Pool** (`c3-standard-8`, `gVNIC`, Multi-NIC `N3`/`S1-U`/`N4`/`N6` with `MTU 8896`, **Cloud NAT**) |
+| **4G EPC / 5G NSA / N26 Plane** | `MME` (`open5gs-mmed`), `HSS` (`open5gs-hssd`), `PCRF` (`open5gs-pcrfd`), `SGW-C` (`open5gs-sgwcd`) + `freeDiameter` | **GKE Standard** (`StatefulSet`/`Deployment` + Multi-NIC `S1-MME` SCTP `:36412`, `S11`/`N26` GTPv2-C `:2123`, `S6a`/`Gx`/`Rx`/`Cx` Diameter `:3868`/`:5868`) |
+| **Subscriber & Policy DB** | MongoDB (`udrd`, `hssd`, `pcfd`, `pcrfd`, `webui`, `open5gs-dbctl`) | **Cloud Firestore Enterprise with MongoDB Compatibility** *(or MongoDB Atlas on GCP)* |
 | **In-Memory Database** | Session Cache, Policy Cache, & UDSF Adapter | **Cloud Memorystore for Valkey / Redis Cluster** (`STANDARD_HA`) |
-| **Network Management System (NMS)** | `open5gs-webui` + `libogsmetrics` (`:9090`) + NF Logs | **Cloud Load Balancing** + **Identity-Aware Proxy (IAP)** + **Cloud Armor** + **Managed Service for Prometheus (GMP)** + **Cloud Monitoring / Logging** + **GKE Config Sync** |
+| **NMS & CLI Automation** | `open5gs-webui` + `open5gs-dbctl` + `libogsmetrics` (`:9090`) + NF Logs | **Cloud Load Balancing** + **Identity-Aware Proxy (IAP)** + **Cloud Armor** + **Managed Service for Prometheus (GMP)** + **Cloud Monitoring / Logging** + **GKE Config Sync** |
 | **5GS E2E Simulation Suite** | **UERANSIM** (`nr-gnb` + `nr-ue`) & **Open5GS Native C Test Suite** (`meson test`) | **GKE Multi-NIC Simulator Pods** (`net1=N2 SCTP`, `net2=N3 GTP-U`, `uesimtun0`) + **GKE Conformance Job** |
 
 ---
@@ -55,7 +60,8 @@ flowchart LR
     ├── 01-control-plane-sba.yaml             # Full 5G SA Control Plane NFs + Managed Prometheus PodMonitoring
     ├── 02-upf-user-plane.yaml                # Multi-NIC UPF StatefulSet with ogstun & N6 NAT masquerade
     ├── 03-nms-webui-iap.yaml                 # Open5GS WebUI NMS behind External ALB, Cloud Armor, & IAP
-    └── 04-ueransim-ran-ue-simulator.yaml     # In-Cluster UERANSIM (gNodeB + UE) & Open5GS Native C Conformance Job
+    ├── 04-ueransim-ran-ue-simulator.yaml     # In-Cluster UERANSIM (gNodeB + UE) & Open5GS Native C Conformance Job
+    └── 05-epc-cups-and-interworking.yaml     # 4G EPC CUPS (MME, HSS, PCRF, SGW-C, SGW-U), N26, freeDiameter & open5gs-dbctl
 ```
 
 ---
@@ -85,16 +91,19 @@ kubectl -n open5gs create secret generic open5gs-redis-secret \
   --from-literal=redis_uri="redis://<MEMORYSTORE_ENDPOINT>:6379"
 ```
 
-### 3. Deploy 5G SA Control Plane, User Plane (UPF), & NMS
+### 3. Deploy 5G SA Control Plane, EPC/N26 Interworking, User Plane (UPF), & NMS
 ```bash
-# Deploy SBA Control Plane NFs (NRF, SCP, UDR, UDM, AUSF, PCF, NSSF, BSF, SEPP, AMF, SMF)
+# Deploy 5G SBA Control Plane NFs (NRF, SCP, UDR, UDM, AUSF, PCF, NSSF, BSF, SEPP, AMF, SMF)
 kubectl apply -f ../k8s/01-control-plane-sba.yaml
 
-# Deploy Multi-NIC User Plane Function (UPF)
+# Deploy Multi-NIC User Plane Function (UPF/PGW-U)
 kubectl apply -f ../k8s/02-upf-user-plane.yaml
 
 # Deploy Open5GS WebUI Network Management System (NMS) with IAP
 kubectl apply -f ../k8s/03-nms-webui-iap.yaml
+
+# Deploy 4G EPC CUPS (MME, HSS, PCRF, SGW-C, SGW-U), N26 Interworking, & open5gs-dbctl Subscriber Seed Job
+kubectl apply -f ../k8s/05-epc-cups-and-interworking.yaml
 ```
 
 ### 4. Simulate the Complete 5GS (UE + gNodeB + Data Path)

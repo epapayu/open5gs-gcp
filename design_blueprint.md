@@ -49,9 +49,9 @@ flowchart TB
 
         subgraph GKE_Cluster["GKE Standard Regional Cluster (Dataplane V2 + Multi-Networking)"]
             
-            subgraph CP_NodePool["Control Plane Node Pool (n2-standard-8 / c3-standard-4)"]
-                AMF["AMF (open5gs-amfd)<br/>N1 / N2 / Namf"]
-                SMF["SMF (open5gs-smfd)<br/>N4 / Nsmf"]
+            subgraph CP_NodePool["5G SBA Control Plane Node Pool (n2-standard-8 / c3-standard-4)"]
+                AMF["AMF (open5gs-amfd)<br/>N1 / N2 / N26 / Namf"]
+                SMF["SMF + PGW-C (open5gs-smfd)<br/>N4 / S5c / Gx / Nsmf"]
                 NRF["NRF (open5gs-nrfd)<br/>Nnrf Service Registry"]
                 SCP["SCP (open5gs-scpd)<br/>Indirect Routing Mesh"]
                 AUSF["AUSF (open5gs-ausfd)<br/>Nausf UE Auth"]
@@ -63,22 +63,31 @@ flowchart TB
                 SEPP["SEPP (open5gs-seppd)<br/>N32 Roaming Edge"]
             end
 
+            subgraph EPC_NodePool["4G EPC CUPS & 5G NSA / N26 Interworking Plane"]
+                MME["MME (open5gs-mmed)<br/>S1-MME / S11 / N26 / S6a / SGs"]
+                HSS["HSS (open5gs-hssd)<br/>S6a / Cx Diameter + freeDiameter"]
+                PCRF["PCRF (open5gs-pcrfd)<br/>Gx / Rx Diameter + freeDiameter"]
+                SGWC["SGW-C (open5gs-sgwcd)<br/>S11 / S5c GTPv2-C / Sxa PFCP"]
+            end
+
             subgraph UP_NodePool["User Plane Node Pool (c3-standard-8 + gVNIC + Tier-1 Networking)"]
-                UPF["UPF (open5gs-upfd)<br/>ogstun Kernel TUN + NAT<br/>N3 (GTP-U) / N4 (PFCP) / N6 (IP)"]
+                UPF["UPF + PGW-U (open5gs-upfd)<br/>ogstun Kernel TUN + NAT<br/>N3 / S5u (GTP-U) / N4 (PFCP) / N6"]
+                SGWU["SGW-U (open5gs-sgwud)<br/>S1-U / S5u (GTP-U) / Sxa (PFCP)"]
             end
         end
 
         subgraph Data_Layer["GCP Native Database & In-Memory Layer"]
             Firestore["Cloud Firestore Enterprise<br/>(MongoDB Compatibility Mode)<br/>Subscribers, Ki/OPc, Policies, Slices"]
             Memorystore["Cloud Memorystore for Valkey / Redis Cluster<br/>NMS Session Cache, AF Policy Cache,<br/>& Stateless UDSF Extension Store"]
-            SecretMgr["Secret Manager & Certificate Authority Service<br/>SBI mTLS Certificates, N32 SEPP Keys, DB Credentials"]
+            SecretMgr["Secret Manager & Certificate Authority Service<br/>SBI mTLS, freeDiameter TLS, N32 SEPP Keys, DB URI"]
         end
 
-        subgraph NMS_Layer["Network Management System (NMS) & FCAPS Observability"]
+        subgraph NMS_Layer["Network Management System (NMS), CLI & FCAPS Observability"]
             WebUI["Open5GS WebUI (Node.js / React)<br/>Subscriber & Slice Provisioning Portal"]
+            DBCTL["open5gs-dbctl CLI Job<br/>Automated Subscriber & Slice Seeding"]
             IAP["Cloud Load Balancing + Cloud Armor + IAP<br/>Zero-Trust Operator Access"]
             GMP["Google Cloud Managed Service for Prometheus (GMP)<br/>Scrapes libogsmetrics (:9090) & Node Exporter"]
-            Monitoring["Cloud Monitoring & Managed Grafana<br/>5G KPIs (Reg Success, Active PDU, N3 Throughput)"]
+            Monitoring["Cloud Monitoring & Managed Grafana<br/>5G/4G KPIs (Reg Success, Active PDU, N3 Throughput)"]
             Logging["Cloud Logging & Log Analytics<br/>Centralized NF Structured Logs & Audit Trail"]
             ConfigSync["GKE Config Sync (GitOps)<br/>Declarative YAML ConfigMaps for PLMN/TAC/Slices"]
         end
@@ -88,11 +97,22 @@ flowchart TB
 
     %% Connections inside GCP
     VPC_N2 --- AMF
+    VPC_N2 --- MME
     VPC_N3 --- UPF
+    VPC_N3 --- SGWU
     VPC_N4 --- SMF
     VPC_N4 --- UPF
+    VPC_N4 --- SGWC
+    VPC_N4 --- SGWU
     VPC_N6 --- UPF
     UPF -->|"N6 UE Traffic"| CloudNAT
+
+    AMF <-->|"N26 (GTPv2-C :2123)"| MME
+    MME <-->|"S6a (Diameter)"| HSS
+    MME <-->|"S11 (GTPv2-C)"| SGWC
+    SGWC <-->|"S5c (GTPv2-C)"| SMF
+    SMF <-->|"Gx (Diameter)"| PCRF
+    SGWU <-->|"S5u (GTP-U)"| UPF
 
     AMF <-->|"HTTP/2 SBI"| SCP
     SMF <-->|"HTTP/2 SBI"| SCP
@@ -107,7 +127,10 @@ flowchart TB
 
     UDR <-->|"MongoDB Wire Protocol (TLS)"| Firestore
     PCF <-->|"MongoDB Wire Protocol (TLS)"| Firestore
+    HSS <-->|"MongoDB Wire Protocol (TLS)"| Firestore
+    PCRF <-->|"MongoDB Wire Protocol (TLS)"| Firestore
     WebUI <-->|"MongoDB Wire Protocol (TLS)"| Firestore
+    DBCTL -->|"MongoDB Wire Protocol (TLS)"| Firestore
     WebUI <-->|"Session & Real-time State"| Memorystore
     PCF -.->|"Policy / Binding Cache"| Memorystore
 
@@ -115,34 +138,43 @@ flowchart TB
     AMF -.->|"/metrics :9090"| GMP
     SMF -.->|"/metrics :9090"| GMP
     UPF -.->|"/metrics :9090"| GMP
+    MME -.->|"/metrics :9090"| GMP
+    PCRF -.->|"/metrics :9090"| GMP
     GMP --> Monitoring
 ```
 
 ---
 
-### C. Complete Open5GS Component-to-GCP Native Service Mapping
+### C. Complete Open5GS Component-to-GCP Native Service Mapping (100% Repository Coverage)
 
-The table below maps every component in the Open5GS repository (`src/`, `webui/`, `configs/`) to its target Google Cloud Platform native service, compute profile, and transport interface.
+The table below maps **every single daemon, CLI utility, protocol stack, and management component** in the Open5GS repository (`src/`, `lib/`, `webui/`, `misc/db/`, `configs/open5gs/`, `configs/freeDiameter/`, `tests/`) to its target Google Cloud Platform native service, compute profile, and transport interface.
 
-| 5GS Layer | Open5GS Component & Daemon | 3GPP Function & Interfaces | Target GCP Native Service | Compute / Storage Profile & Networking Configuration |
+| 5GS / EPC Layer | Open5GS Component & Source Path | 3GPP Function & Protocol Interfaces | Target GCP Native Service | Compute / Storage Profile & Networking Configuration |
 | :--- | :--- | :--- | :--- | :--- |
-| **Control Plane (SBA Core)** | **NRF** (`open5gs-nrfd`) | NF Repository Function (`Nnrf`) — Service registration & discovery | **GKE Standard** (`Deployment` + Headless/ClusterIP HTTP/2 `Service`) | Control Plane Node Pool (`n2-standard-8` or `c3-standard-4`); Primary VPC (`vpc-sbi-mgmt`), TCP `:7777` (HTTP/2). |
-| **Control Plane (SBA Core)** | **SCP** (`open5gs-scpd`) | Service Communication Proxy — Indirect SBA routing & load balancing | **GKE Standard** (`Deployment`) + **Cloud Service Mesh** (Optional) | Control Plane Node Pool; routes HTTP/2 SBI traffic across NFs; integrates with NRF `:7777`. |
-| **Control Plane (RAN Access)** | **AMF** (`open5gs-amfd`) | Access & Mobility Management (`N1`, `N2` NGAP/SCTP, `Namf` HTTP/2) | **GKE Standard** (`StatefulSet`/`Deployment`) with **GKE Dataplane V2 Multi-NIC** | Primary NIC (`eth0`) on `vpc-sbi-mgmt` (HTTP/2 `:7777`); Secondary NIC (`net1`) on `vpc-n2-signaling` exposing **SCTP `:38412`** over HA VPN / Cloud Interconnect. |
-| **Control Plane (Session)** | **SMF** (`open5gs-smfd`) | Session Management Function (`Nsmf` HTTP/2, `N4` PFCP/UDP) | **GKE Standard** (`StatefulSet`/`Deployment`) with **GKE Dataplane V2 Multi-NIC** | Primary NIC (`eth0`) on `vpc-sbi-mgmt` (HTTP/2 `:7777`); Secondary NIC (`net1`) on `vpc-n4-pfcp` (`UDP :8805`) to control UPF PDRs/FARs/QERs. |
-| **Control Plane (Auth & Security)** | **AUSF** (`open5gs-ausfd`) | Authentication Server Function (`Nausf` HTTP/2) — 5G-AKA / EAP-AKA' | **GKE Standard** (`Deployment` + HPA) | Stateless HTTP/2 microservice on `vpc-sbi-mgmt`; scales horizontally on CPU/RPS. |
-| **Control Plane (Subscriber Data)** | **UDM** (`open5gs-udmd`) | Unified Data Management (`Nudm` HTTP/2) — Subscription & auth vectors | **GKE Standard** (`Deployment` + HPA) | Stateless HTTP/2 microservice on `vpc-sbi-mgmt`; queries UDR over HTTP/2 SBI. |
-| **Control Plane (Data Repo API)** | **UDR** (`open5gs-udrd`) | Unified Data Repository (`Nudr` HTTP/2 + MongoDB C Driver `libmongoc`) | **GKE Standard** (`Deployment` + HPA) connected to **Cloud Firestore** | Translates 3GPP `Nudr` HTTP/2 calls into `DB_URI` queries against **Cloud Firestore (MongoDB Compatibility)**. |
-| **Control Plane (Policy)** | **PCF** (`open5gs-pcfd`) | Policy Control Function (`Npcf` HTTP/2 + `libmongoc`) | **GKE Standard** (`Deployment` + HPA) connected to **Cloud Firestore** | Enforces AM/SM/QoS policies; reads policy rules from **Cloud Firestore (MongoDB Compatibility)**. |
-| **Control Plane (Slicing)** | **NSSF** (`open5gs-nssfd`) | Network Slice Selection Function (`Nnssf` HTTP/2) | **GKE Standard** (`Deployment` + HPA) | Evaluates S-NSSAI (`SST`, `SD`) and selects target AMF/NRF set per network slice. |
-| **Control Plane (Binding)** | **BSF** (`open5gs-bsfd`) | Binding Support Function (`Nbsf` HTTP/2) | **GKE Standard** (`Deployment` + HPA) | Maps UE IP / SUPI / PDU Session to the serving PCF instance. |
-| **Control Plane (Roaming)** | **SEPP** (`open5gs-seppd`) | Security Edge Protection Proxy (`N32c`/`N32f` HTTP/2 PRINS/TLS) | **GKE Standard** (`Deployment`) + **GKE Gateway API / Cloud Armor** | Inter-PLMN roaming perimeter; mTLS certificates managed via **Google Cloud Certificate Authority Service (CAS)** & **Secret Manager**. |
-| **User Plane (Data Path)** | **UPF** (`open5gs-upfd`) | User Plane Function (`N3` GTP-U/UDP `:2152`, `N4` PFCP/UDP `:8805`, `N6` IP) | **GKE Standard** (`DaemonSet`/`StatefulSet`) on **Dedicated C3/C4 Node Pool** | `c3-standard-8` (or `c4-standard-8`) with **gVNIC**, **Tier-1 Networking**, Linux kernel `/dev/net/tun` (`ogstun`), `CAP_NET_ADMIN`, 3 secondary NICs (`vpc-n3`, `vpc-n4`, `vpc-n6`), and **Cloud NAT** on `vpc-n6`. |
-| **Persistent Database** | **MongoDB** (`udrd`, `pcfd`, `webui`) | Subscriber profiles (`IMSI`/`SUPI`, `Ki`, `OPc`, `AMBR`, `QCI`/`5QI`) | **Cloud Firestore Enterprise (MongoDB Compatibility)** *(Primary)* or **MongoDB Atlas on GCP** | Regional multi-zone serverless document database speaking the MongoDB wire protocol over Private Service Connect / Private Google Access. |
+| **5GC Control Plane (SBA)** | **NRF** (`open5gs-nrfd` — `src/nrf/`) | NF Repository Function (`Nnrf`) — Service registration & discovery | **GKE Standard** (`Deployment` + Headless/ClusterIP HTTP/2 `Service`) | Control Plane Node Pool (`n2-standard-8` or `c3-standard-4`); Primary VPC (`vpc-sbi-mgmt`), TCP `:7777` (HTTP/2). |
+| **5GC Control Plane (SBA)** | **SCP** (`open5gs-scpd` — `src/scp/`) | Service Communication Proxy — Indirect SBA routing & load balancing | **GKE Standard** (`Deployment`) + **Cloud Service Mesh** (Optional) | Control Plane Node Pool; routes HTTP/2 SBI traffic across NFs; integrates with NRF `:7777`. |
+| **5GC Control Plane (RAN)** | **AMF** (`open5gs-amfd` — `src/amf/`) | Access & Mobility Management (`N1` NAS, `N2` NGAP/SCTP `:38412`, `N26` GTPv2-C `:2123`, `Namf` HTTP/2) | **GKE Standard** (`StatefulSet`) with **GKE Dataplane V2 Multi-NIC** | Primary NIC (`eth0`) on `vpc-sbi-mgmt` (HTTP/2 `:7777` + `N26`); Secondary NIC (`net1`) on `vpc-n2-signaling` exposing **SCTP `:38412`**. |
+| **5GC + EPC Combo Session** | **SMF + PGW-C** (`open5gs-smfd` — `src/smf/`) | Session Management + Combo PGW-C (`Nsmf` HTTP/2, `N4` PFCP `:8805`, `S5c` GTPv2-C `:2123`, `Gx`/`Gy`/`S6b` `freeDiameter`) | **GKE Standard** (`StatefulSet`) with **GKE Dataplane V2 Multi-NIC** | Primary NIC (`eth0`) on `vpc-sbi-mgmt` (HTTP/2 `:7777`, `S5c`, `Gx` Diameter); Secondary NIC (`net1`) on `vpc-n4-pfcp` (`UDP :8805`). |
+| **5GC Control Plane (Auth)** | **AUSF** (`open5gs-ausfd` — `src/ausf/`) | Authentication Server Function (`Nausf` HTTP/2) — 5G-AKA / EAP-AKA' | **GKE Standard** (`Deployment` + HPA) | Stateless HTTP/2 microservice on `vpc-sbi-mgmt`; scales horizontally on CPU/RPS. |
+| **5GC Control Plane (Sub)** | **UDM** (`open5gs-udmd` — `src/udm/`) | Unified Data Management (`Nudm` HTTP/2) — Subscription & Milenage/TUAK auth vectors | **GKE Standard** (`Deployment` + HPA) | Stateless HTTP/2 microservice on `vpc-sbi-mgmt`; queries UDR over HTTP/2 SBI. |
+| **5GC Control Plane (Repo)** | **UDR** (`open5gs-udrd` — `src/udr/`) | Unified Data Repository (`Nudr` HTTP/2 + MongoDB C Driver `libmongoc`) | **GKE Standard** (`Deployment` + HPA) connected to **Cloud Firestore** | Translates 3GPP `Nudr` HTTP/2 calls into `DB_URI` queries against **Cloud Firestore (MongoDB Compatibility)**. |
+| **5GC Control Plane (Policy)** | **PCF** (`open5gs-pcfd` — `src/pcf/`) | Policy Control Function (`Npcf` HTTP/2 + `N5` AF + `libmongoc`) | **GKE Standard** (`Deployment` + HPA) connected to **Cloud Firestore** | Enforces AM/SM/QoS policies; reads policy rules from **Cloud Firestore (MongoDB Compatibility)**. |
+| **5GC Control Plane (Slice)** | **NSSF** (`open5gs-nssfd` — `src/nssf/`) | Network Slice Selection Function (`Nnssf` HTTP/2) | **GKE Standard** (`Deployment` + HPA) | Evaluates S-NSSAI (`SST`, `SD`) and selects target AMF/NRF set per network slice. |
+| **5GC Control Plane (Bind)** | **BSF** (`open5gs-bsfd` — `src/bsf/`) | Binding Support Function (`Nbsf` HTTP/2) | **GKE Standard** (`Deployment` + HPA) | Maps UE IP / SUPI / PDU Session to the serving PCF instance. |
+| **5GC Roaming Perimeter** | **SEPP** (`open5gs-seppd` — `src/sepp/`) | Security Edge Protection Proxy (`N32c`/`N32f` HTTP/2 PRINS/TLS — `sepp1.yaml`, `sepp2.yaml`) | **GKE Standard** (`Deployment`) + **GKE Gateway API / Cloud Armor** | Inter-PLMN roaming perimeter; mTLS certificates managed via **Google Cloud Certificate Authority Service (CAS)** & **Secret Manager**. |
+| **5GC + EPC Combo User Plane** | **UPF + PGW-U** (`open5gs-upfd` — `src/upf/`) | User Plane Function + Combo PGW-U (`N3`/`S5u` GTP-U `:2152`, `N4` PFCP `:8805`, `N6`/`SGi` IP via `ogstun`) | **GKE Standard** (`StatefulSet`) on **Dedicated C3/C4 Node Pool** | `c3-standard-8` with **gVNIC**, Linux kernel `/dev/net/tun` (`ogstun`), `CAP_NET_ADMIN`, 3 secondary NICs (`vpc-n3`, `vpc-n4`, `vpc-n6`), and **Cloud NAT**. |
+| **4G EPC / 5G NSA / N26** | **MME** (`open5gs-mmed` — `src/mme/`) | Mobility Management Entity (`S1-MME` S1AP/SCTP `:36412`, `S11` & **`N26`** GTPv2-C `:2123`, `S6a` Diameter, `SGs` `:29118`) | **GKE Standard** (`StatefulSet`) with **GKE Dataplane V2 Multi-NIC** | Enables 4G LTE, 5G NSA (EN-DC), and **`N26` 5GS-to-EPS handover** with `AMF`; `net1` attached to `vpc-n2-signaling` (`SCTP :36412`). |
+| **4G EPC / IMS Subscriber DB** | **HSS** (`open5gs-hssd` — `src/hss/`) | Home Subscriber Server (`S6a` / `Cx` / `Swx` over `freeDiameter` `:3868`/`:5868` + `libmongoc`) | **GKE Standard** (`Deployment`) connected to **Cloud Firestore** | Authenticates 4G/NSA UEs over `S6a` and IMS VoLTE/VoNR subscribers over `Cx`; backed by **Cloud Firestore (MongoDB Compatibility)**. |
+| **4G EPC / IMS Policy** | **PCRF** (`open5gs-pcrfd` — `src/pcrf/`) | Policy & Charging Rules Function (`Gx` to `SMF/PGW-C`, `Rx` to IMS P-CSCF over `freeDiameter` `:3868`/`:5868`) | **GKE Standard** (`Deployment`) connected to **Cloud Firestore** | Enforces 4G/NSA QoS and IMS dedicated bearer (`QCI 1`/`5QI 1`) rules over Diameter `Gx`/`Rx`. |
+| **4G EPC CUPS Control** | **SGW-C** (`open5gs-sgwcd` — `src/sgwc/`) | Serving Gateway Control Plane (`S11`/`S5c` GTPv2-C `:2123`, `Sxa` PFCP `:8805`) | **GKE Standard** (`StatefulSet`) with **GKE Dataplane V2 Multi-NIC** | Bridges `MME` (`S11`) and combo `SMF/PGW-C` (`S5c`); controls `SGW-U` over `Sxa` PFCP (`vpc-n4-pfcp`). |
+| **4G EPC CUPS User Plane** | **SGW-U** (`open5gs-sgwud` — `src/sgwu/`) | Serving Gateway User Plane (`S1-U` / `S5u` GTP-U `:2152`, `Sxa` PFCP `:8805`) | **GKE Standard** (`StatefulSet`) on **Dedicated C3/C4 Node Pool** | Relays eNodeB/en-gNB `S1-U` GTP-U traffic (`vpc-n3-userplane`) to combo `UPF/PGW-U` (`S5u`). |
+| **Diameter Protocol Stack** | **freeDiameter** (`lib/diameter/`, `configs/freeDiameter/`) | RFC 6733 Diameter Base Protocol (`S6a`, `Gx`, `Rx`, `Cx`, `Gy`, `S6b` over TCP/SCTP + TLS) | **GKE ConfigMaps + Google Cloud CAS / Secret Manager** | Provides TLS certificates (`mme.conf`, `hss.conf`, `smf.conf`, `pcrf.conf`) for Diameter peer authentication inside GKE. |
+| **CLI Provisioning Tool** | **`open5gs-dbctl`** (`misc/db/open5gs-dbctl`) | Automated CLI utility for subscriber, slice (`S-NSSAI`), static IP, and timer CRUD in MongoDB | **GKE `Job` (`open5gs-dbctl-subscriber-seed`)** + **Cloud Build** | Automates zero-touch subscriber and slice seeding into **Cloud Firestore (MongoDB Compatibility)** during deployment. |
+| **Persistent Database** | **MongoDB** (`lib/dbi/` — `udrd`, `hssd`, `pcfd`, `pcrfd`, `webui`, `dbctl`) | Unified subscriber profiles (`IMSI`/`SUPI`, `Ki`, `OPc`, `AMBR`, `QCI`/`5QI`) | **Cloud Firestore Enterprise (MongoDB Compatibility)** *(Primary)* or **MongoDB Atlas on GCP** | Regional multi-zone serverless document database speaking the MongoDB wire protocol over Private Service Connect / Private Google Access. |
 | **In-Memory Database** | **Redis / Valkey** (NMS Session & State Caching) | WebUI sessions, real-time subscriber telemetry cache, AF/NEF rate limiting, & UDSF adapter | **Cloud Memorystore for Valkey** (or **Memorystore for Redis Cluster**) | Sub-millisecond in-memory store with Multi-Zone High Availability and Private Service Connect in `vpc-sbi-mgmt`. |
 | **NMS (Provisioning UI)** | **Open5GS WebUI** (`webui/` Node.js + Express + React) | Subscriber CRUD, SIM key provisioning, slice/APN config | **Cloud Run** (or **GKE Deployment**) + **External Application Load Balancer** + **IAP** + **Cloud Armor** | Serverless or GKE container on port `:9999`, protected by **Identity-Aware Proxy (IAP)** for zero-trust workforce authentication and **Cloud Armor** WAF. |
-| **NMS (FCAPS & Telemetry)** | **Prometheus Metrics & Logs** (`libogsmetrics`, `stdout`) | Performance Management (PM), Fault Management (FM), Configuration Management (CM) | **Google Cloud Managed Service for Prometheus (GMP)** + **Cloud Monitoring** + **Cloud Logging** + **GKE Config Sync** | Scrapes `:9090/metrics` on AMF, SMF, UPF, PCF; alerts on registration drops/PDU failures; manages NF YAML configs via GitOps (`ConfigSync`). |
-| **5GS Simulation (Built-in CI/CD)** | **Open5GS Native Test Suite** (`tests/registration`, `tests/slice`, `tests/app/5gc`) | Built-in C-language 3GPP `N1`/`N2`/`N3` protocol conformance emulator | **GKE `Job` (`open5gs-native-5gc-conformance-test`)** + **Cloud Build** | Runs `meson test` inside the cluster to validate 5G-AKA auth, GUTI re-registration, PDU session creation, and slicing (`NSSF`). |
+| **NMS (FCAPS & Telemetry)** | **Prometheus Metrics & Logs** (`lib/metrics/libogsmetrics`, `stdout`) | Performance Management (PM), Fault Management (FM), Configuration Management (CM) | **Google Cloud Managed Service for Prometheus (GMP)** + **Cloud Monitoring** + **Cloud Logging** + **GKE Config Sync** | Scrapes `:9090/metrics` on `AMF`, `SMF`, `UPF`, `PCF`, `MME`, `PCRF`; alerts on registration drops/PDU failures; manages NF YAML configs via GitOps (`ConfigSync`). |
+| **5GS Simulation (Built-in CI/CD)** | **Open5GS Native Test Suite** (`tests/registration`, `tests/slice`, `tests/app/5gc`, `tests/vnf`) | Built-in C-language 3GPP `N1`/`N2`/`N3`/`S1AP` protocol conformance emulator | **GKE `Job` (`open5gs-native-5gc-conformance-test`)** + **Cloud Build** | Runs `meson test` inside the cluster to validate 5G-AKA auth, GUTI re-registration, PDU session creation, N26 handover, and slicing (`NSSF`). |
 | **5GS Simulation (E2E RAN & UE)** | **UERANSIM** (`nr-gnb` & `nr-ue`) / **PacketRusher** | Full 5G SA RAN (`gNodeB`) + UE (`uesimtun0`) functional & load simulator | **GKE Standard Multi-NIC Pods** (`k8s/04-ueransim-ran-ue-simulator.yaml`) | `nr-gnb` attaches directly to `vpc-n2-signaling` (`SCTP :38412`) and `vpc-n3-userplane` (`UDP :2152`); `nr-ue` creates `uesimtun0` for live end-to-end traffic over `UPF` $\rightarrow$ `N6`. |
 
 ---
@@ -431,12 +463,15 @@ Open5GS requires network separation across signaling (`N2`), user plane (`N3`), 
      --additional-node-network=network=vpc-n6-dn,subnetwork=subnet-n6
    ```
 
-### Phase 5: Deploy Open5GS 5GC Control Plane & UPF Manifests
+### Phase 5: Deploy Open5GS 5GC Control Plane, 4G EPC / N26 Interworking Plane, & UPF Manifests
 1. Apply the GKE `Network` and `GKENetworkParamSet` CRDs (`k8s/00-namespace-and-networks.yaml`) to bind the secondary node NICs into Kubernetes.
-2. Deploy the SBA Control Plane (`k8s/01-control-plane-sba.yaml`):
-   - `NRF` starts first, followed by `SCP`, `UDR`, `UDM`, `AUSF`, `PCF`, `NSSF`, `BSF`, `SEPP`, `SMF`, and `AMF`.
-3. Deploy the User Plane (`k8s/02-upf-user-plane.yaml`):
-   - An init-container or startup script inside the UPF pod creates the `ogstun` device (`ip tuntap add name ogstun mode tun`), assigns the UE pool CIDR (`10.45.0.1/16`), enables `net.ipv4.ip_forward=1`, and adds an `iptables -t nat -A POSTROUTING -s 10.45.0.0/16 ! -o ogstun -j MASQUERADE` rule out the `N6` interface (`net3`).
+2. Deploy the 5G SA SBA Control Plane (`k8s/01-control-plane-sba.yaml`):
+   - `NRF` starts first, followed by `SCP`, `UDR`, `UDM`, `AUSF`, `PCF`, `NSSF`, `BSF`, `SEPP`, `SMF` (Combo `SMF+PGW-C`), and `AMF`.
+3. Deploy the 5G User Plane (`k8s/02-upf-user-plane.yaml`):
+   - An init-container inside the `UPF` (Combo `UPF+PGW-U`) pod creates the `ogstun` device (`ip tuntap add name ogstun mode tun`), assigns the UE pool CIDR (`10.45.0.1/16`), enables `net.ipv4.ip_forward=1`, and adds an `iptables -t nat -A POSTROUTING -s 10.45.0.0/16 -o net3 -j MASQUERADE` rule out the `N6` interface (`net3`).
+4. Deploy the 4G EPC CUPS, `freeDiameter` Stack, `N26` Interworking Plane, & `open5gs-dbctl` Provisioning Job (`k8s/05-epc-cups-and-interworking.yaml`):
+   - Starts `HSS` (`open5gs-hssd`), `PCRF` (`open5gs-pcrfd`), `MME` (`open5gs-mmed` with `N26` connected to `AMF`), `SGW-C` (`open5gs-sgwcd`), and `SGW-U` (`open5gs-sgwud`).
+   - Executes the `open5gs-dbctl-subscriber-seed` Kubernetes `Job` (`misc/db/open5gs-dbctl`) to automatically provision initial subscriber credentials and network slices into **Cloud Firestore (MongoDB Compatibility)**.
 
 ### Phase 6: Deploy the Network Management System (NMS)
 1. Deploy `open5gs-webui` (`k8s/03-nms-webui-iap.yaml`) wired to `open5gs-db-uri` and Memorystore.
@@ -585,6 +620,7 @@ The companion starter templates for deploying this blueprint are included in thi
   - [02-upf-user-plane.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/02-upf-user-plane.yaml): Multi-NIC `open5gs-upfd` deployment with `ogstun` kernel TUN initialization, `CAP_NET_ADMIN`, and N6 NAT masquerading.
   - [03-nms-webui-iap.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/03-nms-webui-iap.yaml): Open5GS WebUI NMS deployment backed by Firestore & Memorystore and secured behind Google Cloud Load Balancing, Cloud Armor, and Identity-Aware Proxy (IAP).
   - [04-ueransim-ran-ue-simulator.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/04-ueransim-ran-ue-simulator.yaml): End-to-end 5G SA RAN (`ueransim-gnb`) and UE (`ueransim-ue`) simulation pods + Open5GS native C protocol conformance `Job` (`open5gs-native-5gc-conformance-test`).
+  - [05-epc-cups-and-interworking.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/05-epc-cups-and-interworking.yaml): Complete 4G EPC CUPS & 5G NSA / `N26` Interworking plane (`MME`, `HSS`, `PCRF`, `SGW-C`, `SGW-U`), `freeDiameter` Diameter services (`S6a`, `Gx`, `Rx`, `Cx`), and the `open5gs-dbctl` automated CLI subscriber provisioning `Job`.
 
 ---
 

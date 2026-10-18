@@ -1,0 +1,351 @@
+# ==============================================================================
+# 05-epc-cups-and-interworking.yaml
+# Complete Open5GS 4G/EPC CUPS, 5G NSA (EN-DC), N26 5GS-EPS Interworking,
+# freeDiameter Stack (HSS, PCRF), and Automated open5gs-dbctl CLI Provisioning
+# Daemons Included:
+#   - open5gs-hssd   : Home Subscriber Server (S6a / Cx / Swx Diameter + MongoDB)
+#   - open5gs-pcrfd  : Policy and Charging Rules Function (Gx / Rx Diameter + MongoDB)
+#   - open5gs-mmed   : Mobility Management Entity (S1-MME SCTP :36412, S11/N26 GTPv2-C :2123, S6a, SGs :29118)
+#   - open5gs-sgwcd  : Serving Gateway Control Plane (S11 / S5c GTPv2-C :2123, Sxa PFCP :8805)
+#   - open5gs-sgwud  : Serving Gateway User Plane (S1-U / S5u GTP-U :2152, Sxa PFCP :8805)
+#   - open5gs-dbctl  : Automated CLI Subscriber & Slice Provisioning Job
+# ==============================================================================
+
+# 1. HSS (Home Subscriber Server - S6a/Cx Diameter over TCP/SCTP :3868 & TLS :5868)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-hss
+  namespace: open5gs
+spec:
+  selector:
+    nf: hss
+  ports:
+    - name: diameter-tcp
+      port: 3868
+      targetPort: 3868
+      protocol: TCP
+    - name: diameter-sctp
+      port: 3868
+      targetPort: 3868
+      protocol: SCTP
+    - name: diameter-tls
+      port: 5868
+      targetPort: 5868
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-hss
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: hss
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: hss
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: hss
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: hssd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-hssd", "-c", "/etc/open5gs/hss.yaml"]
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri
+          ports:
+            - containerPort: 3868
+              name: diameter-tcp
+              protocol: TCP
+            - containerPort: 3868
+              name: diameter-sctp
+              protocol: SCTP
+            - containerPort: 5868
+              name: diameter-tls
+              protocol: TCP
+---
+# 2. PCRF (Policy and Charging Rules Function - Gx/Rx Diameter :3868/:5868)
+# Pairs with open5gs-smfd (Combo PGW-C) over Gx and IMS P-CSCF over Rx
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-pcrf
+  namespace: open5gs
+spec:
+  selector:
+    nf: pcrf
+  ports:
+    - name: diameter-tcp
+      port: 3868
+      targetPort: 3868
+      protocol: TCP
+    - name: diameter-sctp
+      port: 3868
+      targetPort: 3868
+      protocol: SCTP
+    - name: diameter-tls
+      port: 5868
+      targetPort: 5868
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-pcrf
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: pcrf
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: pcrf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: pcrf
+        metrics: enabled
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: pcrfd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-pcrfd", "-c", "/etc/open5gs/pcrf.yaml"]
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri
+          ports:
+            - containerPort: 3868
+              name: diameter-tcp
+              protocol: TCP
+            - containerPort: 5868
+              name: diameter-tls
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+---
+# 3. MME (Mobility Management Entity - S1-MME SCTP :36412, S11/N26 GTPv2-C :2123, SGs :29118)
+# Connects to open5gs-amfd over N26 (GTPv2-C) for 5GS <-> EPS interworking & handover
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-mme
+  namespace: open5gs
+spec:
+  selector:
+    nf: mme
+  ports:
+    - name: s11-n26-gtpc
+      port: 2123
+      targetPort: 2123
+      protocol: UDP
+    - name: sgsap
+      port: 29118
+      targetPort: 29118
+      protocol: SCTP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: open5gs-mme
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: mme
+spec:
+  serviceName: open5gs-mme
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: mme
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: mme
+        metrics: enabled
+      annotations:
+        networking.gke.io/interfaces: |
+          [
+            {"interfaceName":"eth0","network":"default"},
+            {"interfaceName":"net1","network":"n2-signaling-net"}
+          ]
+    spec:
+      nodeSelector:
+        5g-plane: multinic-dataplane
+      containers:
+        - name: mmed
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-mmed", "-c", "/etc/open5gs/mme.yaml"]
+          ports:
+            - containerPort: 36412
+              name: s1ap-sctp
+              protocol: SCTP
+            - containerPort: 2123
+              name: s11-n26-gtpc
+              protocol: UDP
+            - containerPort: 3868
+              name: s6a-diameter
+              protocol: TCP
+            - containerPort: 29118
+              name: sgsap-sctp
+              protocol: SCTP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+---
+# 4. SGW-C (Serving Gateway Control Plane - S11/S5c GTPv2-C :2123 & Sxa PFCP :8805)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-sgwc
+  namespace: open5gs
+spec:
+  selector:
+    nf: sgwc
+  ports:
+    - name: s11-s5c-gtpc
+      port: 2123
+      targetPort: 2123
+      protocol: UDP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: open5gs-sgwc
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: sgwc
+spec:
+  serviceName: open5gs-sgwc
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: sgwc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: sgwc
+      annotations:
+        networking.gke.io/interfaces: |
+          [
+            {"interfaceName":"eth0","network":"default"},
+            {"interfaceName":"net1","network":"n4-pfcp-net"}
+          ]
+    spec:
+      nodeSelector:
+        5g-plane: multinic-dataplane
+      containers:
+        - name: sgwcd
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-sgwcd", "-c", "/etc/open5gs/sgwc.yaml"]
+          ports:
+            - containerPort: 2123
+              name: s11-s5c-gtpc
+              protocol: UDP
+            - containerPort: 8805
+              name: sxa-pfcp
+              protocol: UDP
+---
+# 5. SGW-U (Serving Gateway User Plane - S1-U/S5u GTP-U :2152 & Sxa PFCP :8805)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: open5gs-sgwu
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    nf: sgwu
+spec:
+  serviceName: open5gs-sgwu
+  replicas: 2
+  selector:
+    matchLabels:
+      nf: sgwu
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        nf: sgwu
+      annotations:
+        networking.gke.io/interfaces: |
+          [
+            {"interfaceName":"eth0","network":"default"},
+            {"interfaceName":"net1","network":"n3-userplane-net"},
+            {"interfaceName":"net2","network":"n4-pfcp-net"}
+          ]
+    spec:
+      nodeSelector:
+        5g-plane: multinic-dataplane
+      containers:
+        - name: sgwud
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command: ["open5gs-sgwud", "-c", "/etc/open5gs/sgwu.yaml"]
+          ports:
+            - containerPort: 2152
+              name: s1u-s5u-gtpu
+              protocol: UDP
+            - containerPort: 8805
+              name: sxa-pfcp
+              protocol: UDP
+---
+# 6. open5gs-dbctl Automated Subscriber & Slice CLI Provisioning Job
+# Implements misc/db/open5gs-dbctl to seed initial subscribers & slices into Firestore/MongoDB
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: open5gs-dbctl-subscriber-seed
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: open5gs-dbctl
+          image: ghcr.io/open5gs/open5gs:v2.7.2
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Provisioning initial 5G SA / 4G EPC test subscriber via open5gs-dbctl..."
+              open5gs-dbctl --db_uri="${DB_URI}" add_ue_with_slice \
+                999700000000001 \
+                465B5CE8B199B49FAA5F0A2EE238A6BC \
+                E8ED289DEBA952E4283B54E88E6183CA \
+                internet \
+                1 \
+                010203
+              open5gs-dbctl --db_uri="${DB_URI}" showpretty
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri

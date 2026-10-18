@@ -142,6 +142,8 @@ The table below maps every component in the Open5GS repository (`src/`, `webui/`
 | **In-Memory Database** | **Redis / Valkey** (NMS Session & State Caching) | WebUI sessions, real-time subscriber telemetry cache, AF/NEF rate limiting, & UDSF adapter | **Cloud Memorystore for Valkey** (or **Memorystore for Redis Cluster**) | Sub-millisecond in-memory store with Multi-Zone High Availability and Private Service Connect in `vpc-sbi-mgmt`. |
 | **NMS (Provisioning UI)** | **Open5GS WebUI** (`webui/` Node.js + Express + React) | Subscriber CRUD, SIM key provisioning, slice/APN config | **Cloud Run** (or **GKE Deployment**) + **External Application Load Balancer** + **IAP** + **Cloud Armor** | Serverless or GKE container on port `:9999`, protected by **Identity-Aware Proxy (IAP)** for zero-trust workforce authentication and **Cloud Armor** WAF. |
 | **NMS (FCAPS & Telemetry)** | **Prometheus Metrics & Logs** (`libogsmetrics`, `stdout`) | Performance Management (PM), Fault Management (FM), Configuration Management (CM) | **Google Cloud Managed Service for Prometheus (GMP)** + **Cloud Monitoring** + **Cloud Logging** + **GKE Config Sync** | Scrapes `:9090/metrics` on AMF, SMF, UPF, PCF; alerts on registration drops/PDU failures; manages NF YAML configs via GitOps (`ConfigSync`). |
+| **5GS Simulation (Built-in CI/CD)** | **Open5GS Native Test Suite** (`tests/registration`, `tests/slice`, `tests/app/5gc`) | Built-in C-language 3GPP `N1`/`N2`/`N3` protocol conformance emulator | **GKE `Job` (`open5gs-native-5gc-conformance-test`)** + **Cloud Build** | Runs `meson test` inside the cluster to validate 5G-AKA auth, GUTI re-registration, PDU session creation, and slicing (`NSSF`). |
+| **5GS Simulation (E2E RAN & UE)** | **UERANSIM** (`nr-gnb` & `nr-ue`) / **PacketRusher** | Full 5G SA RAN (`gNodeB`) + UE (`uesimtun0`) functional & load simulator | **GKE Standard Multi-NIC Pods** (`k8s/04-ueransim-ran-ue-simulator.yaml`) | `nr-gnb` attaches directly to `vpc-n2-signaling` (`SCTP :38412`) and `vpc-n3-userplane` (`UDP :2152`); `nr-ue` creates `uesimtun0` for live end-to-end traffic over `UPF` $\rightarrow$ `N6`. |
 
 ---
 
@@ -268,6 +270,46 @@ flowchart LR
    - All Open5GS daemon logs (`ogs_error`, `ogs_warn`, NGAP/NAS decode traces) stream to **Cloud Logging**. Log-based metrics trigger **Cloud Monitoring** alerts on SCTP association drops (`NGAP_EVENT_SCTP_ASSOC_SHUTDOWN`), PFCP heartbeat timeouts, or authentication failures (`5G-AKA Synch Failure`).
 4. **Configuration Management (CM) — GKE Config Sync (GitOps)**:
    - Every Open5GS NF reads a declarative YAML file (`amf.yaml`, `smf.yaml`, `upf.yaml`, etc.). Storing these as Kubernetes `ConfigMap` manifests managed by **GKE Config Sync** provides auditable, version-controlled Configuration Management across environments.
+
+---
+
+### G. End-to-End 5GS Simulation Architecture on GCP (UE & gNodeB Emulation)
+
+A critical requirement for deploying a 5G Core in Google Cloud is the ability to **simulate the entire 5G System (UE + RAN + 5GC + Data Network) 100% in software** without requiring physical gNodeB radios or RF spectrum. Open5GS and its ecosystem provide a **three-tier simulation strategy** that runs natively inside the same GKE cluster (or in a peered Simulation VPC):
+
+```mermaid
+flowchart LR
+    subgraph Sim_Plane["In-Cluster 5G RAN & UE Simulation Plane (GKE)"]
+        UE_Sim["UERANSIM UE Pod (nr-ue)<br/>5G-AKA SIM (IMSI / Ki / OPc)<br/>Creates uesimtun0 (10.45.0.2)"]
+        gNB_Sim["UERANSIM gNodeB Pod (nr-gnb)<br/>Multi-NIC: eth0 (NR-Uu),<br/>net1 (N2 SCTP), net2 (N3 GTP-U)"]
+        CI_Job["Open5GS Native C Test Job<br/>(build/tests/registration & slice)<br/>Automated 3GPP Conformance"]
+        UE_Sim <-->|"Virtual NR-Uu Air Interface<br/>(RLS over UDP :4997)"| gNB_Sim
+    end
+
+    subgraph Core_Plane["Open5GS 5G SA Core on GKE (Multi-NIC)"]
+        AMF_Core["AMF (open5gs-amfd)<br/>net1: vpc-n2-signaling (:38412)"]
+        SMF_Core["SMF (open5gs-smfd)<br/>net1: vpc-n4-pfcp (:8805)"]
+        UPF_Core["UPF (open5gs-upfd)<br/>net1: vpc-n3-userplane (:2152)<br/>net3: vpc-n6-dn + ogstun"]
+        SBA_Core["SBA Control Plane<br/>(NRF, SCP, AUSF, UDM, UDR, PCF, NSSF)"]
+        AMF_Core <-->|"HTTP/2 SBI"| SBA_Core
+        SMF_Core <-->|"HTTP/2 SBI"| SBA_Core
+        SMF_Core <-->|"N4 PFCP (UDP :8805)"| UPF_Core
+    end
+
+    gNB_Sim <-->|"N2 NGAP (SCTP :38412)<br/>via vpc-n2-signaling"| AMF_Core
+    gNB_Sim <-->|"N3 GTP-U (UDP :2152)<br/>via vpc-n3-userplane"| UPF_Core
+    CI_Job -.->|"N1/N2/N3 Protocol Verification"| AMF_Core
+    UPF_Core -->|"N6 Egress (Cloud NAT)"| Internet["External Data Network<br/>(8.8.8.8 / iperf3 Target)"]
+```
+
+#### Comparison of 5GS Simulation Methods on GCP
+
+| Simulation Tier | Tool / Component | What It Simulates | How It Runs in GCP | Best Use Case |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier 1: Native Built-in C Conformance Suite** | **Open5GS Internal Tests** (`./build/tests/registration`, `tests/slice`, `tests/vnf`) | Emulates 3GPP `N1` NAS signaling, `N2` NGAP SCTP packets, and `N3` GTP-U ICMP echoes directly in C (`meson test`). | Runs as a Kubernetes `Job` (`open5gs-native-5gc-conformance-test` in `k8s/04-ueransim-ran-ue-simulator.yaml`) or inside **Cloud Build** CI pipelines. | Fast automated CI/CD regression testing of 5G-AKA authentication, GUTI re-registration, slicing (`NSSF`), and SMF/UPF PFCP session setup. |
+| **Tier 2: Full Functional E2E Simulator (Recommended)** | **UERANSIM** (`nr-gnb` + `nr-ue`) | Simulates complete 5G SA `gNodeB` and `UE` control + user plane; creates a real Linux `TUN` interface (`uesimtun0`) inside the UE pod with the SMF-assigned IP (`10.45.0.x`). | Deployed as GKE workloads (`ueransim-gnb` with Multi-NIC `net1=N2`, `net2=N3` and `ueransim-ue` with `CAP_NET_ADMIN`). Communicates over virtualized NR-Uu (`UDP :4997`). | End-to-end functional validation of subscriber provisioning in WebUI, live PDU sessions, `ping`, `curl`, DNS resolution, and `iperf3` throughput testing. |
+| **Tier 3: High-Scale Stress & Load Generator** | **PacketRusher** *(or my5G-RANTester)* | Multi-UE and multi-gNodeB load generator written in Go + kernel `gtp5g` module; simulates 1,000 to 10,000+ concurrent UEs. | Deployed on a dedicated `c3-standard-8` GKE Ubuntu node pool attached to `vpc-n2-signaling` and `vpc-n3-userplane`. | Control-plane registration storm testing (registrations/sec) and multi-Gbps UPF `N3`/`N6` user-plane saturation testing. |
+| **Tier 4: Full PHY/MAC L1/L2/L3 Emulation** | **srsRAN Project** + **ZeroMQ Virtual RF** | Full 3GPP 5G NR L1/L2/L3 protocol stack (PHY, MAC, RLC, PDCP, RRC, SDAP) over ZeroMQ virtualized IQ samples. | Runs on compute-optimized `c3-standard-16` GKE pods or GCE VMs without SDR hardware. | Validating RAN-to-Core RRC state transitions, handover procedures, and radio resource management. |
 
 ---
 
@@ -401,14 +443,52 @@ Open5GS requires network separation across signaling (`N2`), user plane (`N3`), 
 2. Enable **Identity-Aware Proxy (IAP)** on the GKE `BackendConfig` so only authorized engineers with the `roles/iap.httpsResourceAccessor` IAM role can access the Subscriber Management Portal.
 3. Apply the `PodMonitoring` resources so **Google Cloud Managed Service for Prometheus** automatically ingests Open5GS `:9090/metrics` endpoints into Cloud Monitoring.
 
-### Phase 7: End-to-End Verification with UERANSIM
-1. Provision a test subscriber in **Open5GS WebUI** (`IMSI: 999700000000001`, `Ki: 465B5CE8B199B49FAA5F0A2EE238A6BC`, `OPc: E8ED289DEBA952E4283B54E88E6183CA`, `DNN: internet`, `SST: 1`).
-2. Deploy **UERANSIM** (`nr-gnb` and `nr-ue`) in a test subnet or on-premises lab connected over HA VPN:
-   - Point `gnb.yaml` `amfConfigs` to the AMF `N2` IP (`10.20.0.x:38412`) and `gtpIp` to the `N3` network.
-3. Verify:
-   - `amfd` logs: `InitialUEMessage`, `Registration accept`, `PDU Session establishment accept`.
-   - `upfd` logs: `PFCP associated`, GTP-U tunnel active on `ogstun`.
-   - From UERANSIM UE: `ping -I uesimtun0 8.8.8.8` and verify Prometheus counters in **Cloud Monitoring**.
+### Phase 7: End-to-End 5GS Simulation & Functional Verification
+Because the GKE cluster has `vpc-n2-signaling` and `vpc-n3-userplane` attached via GKE Dataplane V2 Multi-Networking, you can validate the entire 5GS 100% inside GCP using the included simulation manifest (`k8s/04-ueransim-ran-ue-simulator.yaml`).
+
+1. **Provision the Simulated Subscriber in Open5GS WebUI**:
+   - Open the IAP-protected **Open5GS WebUI** and add a subscriber matching `ue.yaml`:
+     - **SUPI (IMSI)**: `999700000000001`
+     - **Permanent Key (`K`)**: `465B5CE8B199B49FAA5F0A2EE238A6BC`
+     - **Operator Key (`OPc`)**: `E8ED289DEBA952E4283B54E88E6183CA`
+     - **Slice (`S-NSSAI`)**: `SST: 1`, `SD: 0x010203`
+     - **DNN / APN**: `internet`
+2. **Deploy the In-Cluster 5GS Simulator (`UERANSIM` + Native Conformance Job)**:
+   ```bash
+   kubectl apply -f k8s/04-ueransim-ran-ue-simulator.yaml
+   ```
+3. **Verify Tier 1 — Open5GS Built-in C Conformance Suite (`meson test`)**:
+   ```bash
+   kubectl -n open5gs logs job/open5gs-native-5gc-conformance-test
+   ```
+   - Confirms 3GPP Release-17/18 registration, GUTI re-registration, 5G-AKA authentication vectors, and NSSF slice selection pass at the protocol level.
+4. **Verify Tier 2 — `UERANSIM` gNodeB (`N2` SCTP) & UE (`N1` NAS + `N3` GTP-U) Attachment**:
+   ```bash
+   # 1. Verify gNodeB SCTP Association & NG Setup with Open5GS AMF
+   kubectl -n open5gs logs deploy/ueransim-gnb
+   # Expected output:
+   # [ngap] [info] NG Setup procedure is successful
+
+   # 2. Verify UE 5G-AKA Registration & PDU Session Establishment (uesimtun0)
+   kubectl -n open5gs logs deploy/ueransim-ue
+   # Expected output:
+   # [nas] [info] Registration is successful
+   # [nas] [info] PDU Session establishment is successful PSI[1]
+   # [app] [info] Connection setup for PDU session[1] is successful, TUN interface[uesimtun0, 10.45.0.2] is up.
+   ```
+5. **Execute End-to-End User Plane Data Path Tests (`UE` $\rightarrow$ `gNodeB` $\rightarrow$ `N3 GTP-U` $\rightarrow$ `UPF ogstun` $\rightarrow$ `N6 Cloud NAT`)**:
+   ```bash
+   # Ping external internet through the simulated 5G PDU session tunnel (uesimtun0)
+   kubectl -n open5gs exec -it deploy/ueransim-ue -- ping -I uesimtun0 -c 5 8.8.8.8
+
+   # Fetch HTTP payload over the 5G User Plane
+   kubectl -n open5gs exec -it deploy/ueransim-ue -- curl --interface uesimtun0 -I https://www.google.com
+
+   # Trigger UERANSIM CLI commands (e.g., status, session release, or multi-session creation)
+   kubectl -n open5gs exec -it deploy/ueransim-ue -- nr-cli imsi-999700000000001 --exec "ps-list"
+   ```
+6. **Verify Telemetry in NMS (Google Cloud Managed Service for Prometheus)**:
+   - Open **Cloud Monitoring Metrics Explorer** and query `fivegs_amffunction_rm_registeredsubnbr`, `fivegs_smffunction_sm_sessionnbr`, and `fivegs_upffunction_upf_sessionnbr` to confirm real-time KPI visibility.
 
 ---
 
@@ -504,6 +584,7 @@ The companion starter templates for deploying this blueprint are included in thi
   - [01-control-plane-sba.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/01-control-plane-sba.yaml): Full 3GPP SBA Control Plane deployments (`NRF`, `SCP`, `UDR`, `UDM`, `AUSF`, `PCF`, `NSSF`, `BSF`, `SEPP`, `SMF`, `AMF`) + `PodMonitoring` for Google Cloud Managed Service for Prometheus.
   - [02-upf-user-plane.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/02-upf-user-plane.yaml): Multi-NIC `open5gs-upfd` deployment with `ogstun` kernel TUN initialization, `CAP_NET_ADMIN`, and N6 NAT masquerading.
   - [03-nms-webui-iap.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/03-nms-webui-iap.yaml): Open5GS WebUI NMS deployment backed by Firestore & Memorystore and secured behind Google Cloud Load Balancing, Cloud Armor, and Identity-Aware Proxy (IAP).
+  - [04-ueransim-ran-ue-simulator.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/04-ueransim-ran-ue-simulator.yaml): End-to-end 5G SA RAN (`ueransim-gnb`) and UE (`ueransim-ue`) simulation pods + Open5GS native C protocol conformance `Job` (`open5gs-native-5gc-conformance-test`).
 
 ---
 

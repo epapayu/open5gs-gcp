@@ -36,6 +36,7 @@ flowchart LR
 | **Subscriber & Policy DB** | MongoDB (`udrd`, `pcfd`, `webui`) | **Cloud Firestore Enterprise with MongoDB Compatibility** *(or MongoDB Atlas on GCP)* |
 | **In-Memory Database** | Session Cache, Policy Cache, & UDSF Adapter | **Cloud Memorystore for Valkey / Redis Cluster** (`STANDARD_HA`) |
 | **Network Management System (NMS)** | `open5gs-webui` + `libogsmetrics` (`:9090`) + NF Logs | **Cloud Load Balancing** + **Identity-Aware Proxy (IAP)** + **Cloud Armor** + **Managed Service for Prometheus (GMP)** + **Cloud Monitoring / Logging** + **GKE Config Sync** |
+| **5GS E2E Simulation Suite** | **UERANSIM** (`nr-gnb` + `nr-ue`) & **Open5GS Native C Test Suite** (`meson test`) | **GKE Multi-NIC Simulator Pods** (`net1=N2 SCTP`, `net2=N3 GTP-U`, `uesimtun0`) + **GKE Conformance Job** |
 
 ---
 
@@ -43,17 +44,18 @@ flowchart LR
 
 ```text
 .
-├── README.md                           # Repository overview and quickstart guide
-├── design_blueprint.md                 # Comprehensive 5G Principal Architect Design Blueprint
-├── .gitignore                          # Excludes Terraform state, GCP credentials, and SIM keys
+├── README.md                                 # Repository overview and quickstart guide
+├── design_blueprint.md                       # Comprehensive 5G Principal Architect Design Blueprint
+├── .gitignore                                # Excludes Terraform state, GCP credentials, and SIM keys
 ├── terraform/
-│   ├── main.tf                         # Multi-VPC (SBI, N2, N3, N4, N6), GKE Dataplane V2, Firestore, Memorystore
-│   └── variables.tf                    # Parameterized GCP project, region, PLMN (MCC/MNC), and CIDRs
+│   ├── main.tf                               # Multi-VPC (SBI, N2, N3, N4, N6), GKE Dataplane V2, Firestore, Memorystore
+│   └── variables.tf                          # Parameterized GCP project, region, PLMN (MCC/MNC), and CIDRs
 └── k8s/
-    ├── 00-namespace-and-networks.yaml  # Namespace & GKE Multi-Network CRDs (N2, N3, N4, N6)
-    ├── 01-control-plane-sba.yaml       # Full 5G SA Control Plane NFs + Managed Prometheus PodMonitoring
-    ├── 02-upf-user-plane.yaml          # Multi-NIC UPF StatefulSet with ogstun & N6 NAT masquerade
-    └── 03-nms-webui-iap.yaml           # Open5GS WebUI NMS behind External ALB, Cloud Armor, & IAP
+    ├── 00-namespace-and-networks.yaml        # Namespace & GKE Multi-Network CRDs (N2, N3, N4, N6)
+    ├── 01-control-plane-sba.yaml             # Full 5G SA Control Plane NFs + Managed Prometheus PodMonitoring
+    ├── 02-upf-user-plane.yaml                # Multi-NIC UPF StatefulSet with ogstun & N6 NAT masquerade
+    ├── 03-nms-webui-iap.yaml                 # Open5GS WebUI NMS behind External ALB, Cloud Armor, & IAP
+    └── 04-ueransim-ran-ue-simulator.yaml     # In-Cluster UERANSIM (gNodeB + UE) & Open5GS Native C Conformance Job
 ```
 
 ---
@@ -93,6 +95,22 @@ kubectl apply -f ../k8s/02-upf-user-plane.yaml
 
 # Deploy Open5GS WebUI Network Management System (NMS) with IAP
 kubectl apply -f ../k8s/03-nms-webui-iap.yaml
+```
+
+### 4. Simulate the Complete 5GS (UE + gNodeB + Data Path)
+```bash
+# Deploy UERANSIM (nr-gnb + nr-ue) & Open5GS Native C Conformance Test Job
+kubectl apply -f ../k8s/04-ueransim-ran-ue-simulator.yaml
+
+# Check Open5GS Native 3GPP Registration & Slicing Conformance Test logs
+kubectl -n open5gs logs job/open5gs-native-5gc-conformance-test
+
+# Verify UERANSIM UE Registration & PDU Session Tunnel (uesimtun0)
+kubectl -n open5gs logs deploy/ueransim-ue
+
+# Send live User Plane traffic from the simulated UE through UPF (ogstun) -> N6 Internet
+kubectl -n open5gs exec -it deploy/ueransim-ue -- ping -I uesimtun0 -c 5 8.8.8.8
+kubectl -n open5gs exec -it deploy/ueransim-ue -- curl --interface uesimtun0 -I https://www.google.com
 ```
 
 ---

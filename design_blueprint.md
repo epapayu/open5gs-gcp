@@ -32,16 +32,16 @@ flowchart TB
         Interconnect --- Router
     end
 
-    gNB <-->|"N2 (NGAP / SCTP :38412)\nN3 (GTP-U / UDP :2152)"| Interconnect
+    gNB <-->|"N2 (NGAP / SCTP :38412)<br/>N3 (GTP-U / UDP :2152)"| Interconnect
 
     subgraph GCP_Region["Google Cloud Public Region (e.g., us-central1)"]
         
         subgraph Multi_VPC["Multi-VPC Network Fabric"]
-            VPC_SBI["vpc-sbi-mgmt (Primary GKE Network - MTU 1460)\nHTTP/2 SBI + Management"]
-            VPC_N2["vpc-n2-signaling (Secondary NIC - MTU 1500)\nSCTP NGAP Signaling"]
-            VPC_N3["vpc-n3-userplane (Secondary NIC - MTU 8896)\nGTP-U Encapsulated User Plane"]
-            VPC_N4["vpc-n4-pfcp (Secondary NIC - MTU 8896)\nPFCP Session Control"]
-            VPC_N6["vpc-n6-dn (Secondary NIC - MTU 1500)\nExternal Data Network / Internet Breakout"]
+            VPC_SBI["vpc-sbi-mgmt (Primary GKE Network - MTU 1460)<br/>HTTP/2 SBI + Management"]
+            VPC_N2["vpc-n2-signaling (Secondary NIC - MTU 1500)<br/>SCTP NGAP Signaling"]
+            VPC_N3["vpc-n3-userplane (Secondary NIC - MTU 8896)<br/>GTP-U Encapsulated User Plane"]
+            VPC_N4["vpc-n4-pfcp (Secondary NIC - MTU 8896)<br/>PFCP Session Control"]
+            VPC_N6["vpc-n6-dn (Secondary NIC - MTU 1500)<br/>External Data Network / Internet Breakout"]
         end
 
         Router --> VPC_N2
@@ -50,40 +50,40 @@ flowchart TB
         subgraph GKE_Cluster["GKE Standard Regional Cluster (Dataplane V2 + Multi-Networking)"]
             
             subgraph CP_NodePool["Control Plane Node Pool (n2-standard-8 / c3-standard-4)"]
-                AMF["AMF (open5gs-amfd)\nN1 / N2 / Namf"]
-                SMF["SMF (open5gs-smfd)\nN4 / Nsmf"]
-                NRF["NRF (open5gs-nrfd)\nNnrf Service Registry"]
-                SCP["SCP (open5gs-scpd)\nIndirect Routing Mesh"]
-                AUSF["AUSF (open5gs-ausfd)\nNausf UE Auth"]
-                UDM["UDM (open5gs-udmd)\nNudm Subscription Mgmt"]
-                UDR["UDR (open5gs-udrd)\nNudr Data Repository"]
-                PCF["PCF (open5gs-pcfd)\nNpcf Policy Control"]
-                NSSF["NSSF (open5gs-nssfd)\nNnssf Slice Selection"]
-                BSF["BSF (open5gs-bsfd)\nNbsf Session Binding"]
-                SEPP["SEPP (open5gs-seppd)\nN32 Roaming Edge"]
+                AMF["AMF (open5gs-amfd)<br/>N1 / N2 / Namf"]
+                SMF["SMF (open5gs-smfd)<br/>N4 / Nsmf"]
+                NRF["NRF (open5gs-nrfd)<br/>Nnrf Service Registry"]
+                SCP["SCP (open5gs-scpd)<br/>Indirect Routing Mesh"]
+                AUSF["AUSF (open5gs-ausfd)<br/>Nausf UE Auth"]
+                UDM["UDM (open5gs-udmd)<br/>Nudm Subscription Mgmt"]
+                UDR["UDR (open5gs-udrd)<br/>Nudr Data Repository"]
+                PCF["PCF (open5gs-pcfd)<br/>Npcf Policy Control"]
+                NSSF["NSSF (open5gs-nssfd)<br/>Nnssf Slice Selection"]
+                BSF["BSF (open5gs-bsfd)<br/>Nbsf Session Binding"]
+                SEPP["SEPP (open5gs-seppd)<br/>N32 Roaming Edge"]
             end
 
             subgraph UP_NodePool["User Plane Node Pool (c3-standard-8 + gVNIC + Tier-1 Networking)"]
-                UPF["UPF (open5gs-upfd)\nogstun Kernel TUN + NAT\nN3 (GTP-U) / N4 (PFCP) / N6 (IP)"]
+                UPF["UPF (open5gs-upfd)<br/>ogstun Kernel TUN + NAT<br/>N3 (GTP-U) / N4 (PFCP) / N6 (IP)"]
             end
         end
 
         subgraph Data_Layer["GCP Native Database & In-Memory Layer"]
-            Firestore["Cloud Firestore Enterprise\n(MongoDB Compatibility Mode)\nSubscribers, Ki/OPc, Policies, Slices"]
-            Memorystore["Cloud Memorystore for Valkey / Redis Cluster\nNMS Session Cache, AF Policy Cache,\n& Stateless UDSF Extension Store"]
-            SecretMgr["Secret Manager & Certificate Authority Service\nSBI mTLS Certificates, N32 SEPP Keys, DB Credentials"]
+            Firestore["Cloud Firestore Enterprise<br/>(MongoDB Compatibility Mode)<br/>Subscribers, Ki/OPc, Policies, Slices"]
+            Memorystore["Cloud Memorystore for Valkey / Redis Cluster<br/>NMS Session Cache, AF Policy Cache,<br/>& Stateless UDSF Extension Store"]
+            SecretMgr["Secret Manager & Certificate Authority Service<br/>SBI mTLS Certificates, N32 SEPP Keys, DB Credentials"]
         end
 
         subgraph NMS_Layer["Network Management System (NMS) & FCAPS Observability"]
-            WebUI["Open5GS WebUI (Node.js / React)\nSubscriber & Slice Provisioning Portal"]
-            IAP["Cloud Load Balancing + Cloud Armor + IAP\nZero-Trust Operator Access"]
-            GMP["Google Cloud Managed Service for Prometheus (GMP)\nScrapes libogsmetrics (:9090) & Node Exporter"]
-            Monitoring["Cloud Monitoring & Managed Grafana\n5G KPIs (Reg Success, Active PDU, N3 Throughput)"]
-            Logging["Cloud Logging & Log Analytics\nCentralized NF Structured Logs & Audit Trail"]
-            ConfigSync["GKE Config Sync (GitOps)\nDeclarative YAML ConfigMaps for PLMN/TAC/Slices"]
+            WebUI["Open5GS WebUI (Node.js / React)<br/>Subscriber & Slice Provisioning Portal"]
+            IAP["Cloud Load Balancing + Cloud Armor + IAP<br/>Zero-Trust Operator Access"]
+            GMP["Google Cloud Managed Service for Prometheus (GMP)<br/>Scrapes libogsmetrics (:9090) & Node Exporter"]
+            Monitoring["Cloud Monitoring & Managed Grafana<br/>5G KPIs (Reg Success, Active PDU, N3 Throughput)"]
+            Logging["Cloud Logging & Log Analytics<br/>Centralized NF Structured Logs & Audit Trail"]
+            ConfigSync["GKE Config Sync (GitOps)<br/>Declarative YAML ConfigMaps for PLMN/TAC/Slices"]
         end
 
-        CloudNAT["Cloud NAT & Cloud Router\nN6 Egress to External Data Network / Internet"]
+        CloudNAT["Cloud NAT & Cloud Router<br/>N6 Egress to External Data Network / Internet"]
     end
 
     %% Connections inside GCP
@@ -203,7 +203,7 @@ sequenceDiagram
     PCF->>DB: Query Policy Rules
     DB-->>PCF: Policy Decision (5QI=9, Session-AMBR)
     PCF-->>SMF: Apply PCC Rules
-    SMF->>UPF: PFCP Session Establishment Request (UDP :8805 over vpc-n4-pfcp)\nInstall PDR, FAR, QER, and allocate UE IP (10.45.0.x)
+    SMF->>UPF: PFCP Session Establishment Request (UDP :8805 over vpc-n4-pfcp)<br/>Install PDR, FAR, QER, and allocate UE IP (10.45.0.x)
     UPF-->>SMF: PFCP Session Establishment Response (Created TEID)
     SMF-->>AMF: N2 SM Info (UPF N3 IP + UL TEID) & NAS PDU Session Accept
     AMF-->>UE: NGAP InitialContextSetupRequest / PDU Session Resource Setup
@@ -211,7 +211,7 @@ sequenceDiagram
     Note over UE,DN: Phase 3: User Plane Data Transfer (N3 GTP-U & N6 IP Breakout)
     UE->>VPN: Uplink User Packet encapsulated in GTP-U (UDP :2152)
     VPN->>UPF: Arrives on UPF N3 NIC (vpc-n3-userplane, MTU 8896)
-    Note right of UPF: open5gs-upfd decapsulates GTP-U\nRoutes inner IP packet via ogstun\nApplies NAT masquerade to vpc-n6-dn
+    Note right of UPF: open5gs-upfd decapsulates GTP-U<br/>Routes inner IP packet via ogstun<br/>Applies NAT masquerade to vpc-n6-dn
     UPF->>DN: Egress IP Packet via Cloud NAT to Internet / Enterprise DN
 ```
 
@@ -225,33 +225,33 @@ A production 5G Core requires a comprehensive **Network Management System (NMS)*
 flowchart LR
     subgraph Admin["Network Operators & OSS/BSS"]
         Op["5G Core Administrator"]
-        Git["Git Repository\n(PLMN, TAC, Slice & NF YAML)"]
+        Git["Git Repository<br/>(PLMN, TAC, Slice & NF YAML)"]
     end
 
     subgraph Security_Edge["Zero-Trust NMS Perimeter"]
         GLB["Google Cloud External ALB"]
         Armor["Cloud Armor WAF"]
-        IAP["Identity-Aware Proxy (IAP)\nGoogle Workspace / Cloud IAM"]
+        IAP["Identity-Aware Proxy (IAP)<br/>Google Workspace / Cloud IAM"]
         GLB --> Armor --> IAP
     end
 
     subgraph NMS_Core["NMS Control & Provisioning Plane"]
-        WebUI["Open5GS WebUI Pods\n(Node.js / React :9999)"]
-        ConfigSync["GKE Config Sync\n(Declarative GitOps CM)"]
+        WebUI["Open5GS WebUI Pods<br/>(Node.js / React :9999)"]
+        ConfigSync["GKE Config Sync<br/>(Declarative GitOps CM)"]
     end
 
     subgraph Telemetry["FCAPS Observability Plane (GMP & Cloud Ops)"]
-        GMP["Managed Service for Prometheus\nScrapes /metrics :9090"]
-        CloudLog["Cloud Logging\nNF JSON/Text Logs"]
-        Dashboards["Cloud Monitoring & Managed Grafana\n3GPP KPI Dashboards & Alerting"]
+        GMP["Managed Service for Prometheus<br/>Scrapes /metrics :9090"]
+        CloudLog["Cloud Logging<br/>NF JSON/Text Logs"]
+        Dashboards["Cloud Monitoring & Managed Grafana<br/>3GPP KPI Dashboards & Alerting"]
         GMP --> Dashboards
         CloudLog --> Dashboards
     end
 
     Op -->|"HTTPS :443"| GLB
     IAP -->|"Authenticated Identity"| WebUI
-    WebUI -->|"Provision IMSI / Ki / OPc / Slices"| Firestore[("Cloud Firestore\n(MongoDB Compat)")]
-    WebUI <-->|"Session Store"| Valkey[("Cloud Memorystore\n(Valkey)")]
+    WebUI -->|"Provision IMSI / Ki / OPc / Slices"| Firestore[("Cloud Firestore<br/>(MongoDB Compat)")]
+    WebUI <-->|"Session Store"| Valkey[("Cloud Memorystore<br/>(Valkey)")]
     Git -->|"GitOps Sync"| ConfigSync
     ConfigSync -->|"Updates ConfigMaps & Rolling Restart"| NFs["Open5GS NFs (AMF/SMF/UPF/NRF/PCF)"]
     NFs -->|"libogsmetrics (:9090)"| GMP

@@ -8,21 +8,24 @@ This repository provides a **Principal Architect Reference Blueprint**, **Terraf
 
 ```mermaid
 flowchart LR
-    RAN["5G gNodeB / UERANSIM"] <-->|"N2 (SCTP :38412)\nN3 (GTP-U :2152)"| VPN["Cloud Interconnect /\nHA VPN"]
-    VPN --> GKE["GKE Standard Regional Cluster\n(Dataplane V2 + Multi-Networking)"]
+    RAN["5G gNodeB / UERANSIM"] <-->|"N2 (SCTP :38412)<br/>N3 (GTP-U :2152)"| VPN["Cloud Interconnect /<br/>HA VPN"]
 
-    subgraph GKE["GKE Standard Regional Cluster (Dataplane V2 + Multi-Networking)"]
-        CP["SBA Control Plane NFs\n(NRF, SCP, AMF, SMF, AUSF,\nUDM, UDR, PCF, NSSF, BSF, SEPP)"]
-        UPF["Dedicated User Plane (UPF)\n(c3-standard-8 + gVNIC + ogstun)"]
-        WebUI["Open5GS WebUI (NMS)\n(:9999 behind IAP & Cloud Armor)"]
+    subgraph GKE_Cluster["GKE Standard Regional Cluster (Dataplane V2 + Multi-Networking)"]
+        CP["SBA Control Plane NFs<br/>(NRF, SCP, AMF, SMF, AUSF,<br/>UDM, UDR, PCF, NSSF, BSF, SEPP)"]
+        UPF["Dedicated User Plane (UPF)<br/>(c3-standard-8 + gVNIC + ogstun)"]
+        WebUI["Open5GS WebUI (NMS)<br/>(:9999 behind IAP & Cloud Armor)"]
         CP <-->|"N4 (PFCP :8805)"| UPF
     end
 
-    CP <-->|"MongoDB Wire Protocol"| Firestore[("Cloud Firestore Enterprise\n(MongoDB Compatibility)")]
+    VPN <-->|"N2 NGAP (SCTP)"| CP
+    VPN <-->|"N3 GTP-U (UDP)"| UPF
+
+    CP <-->|"MongoDB Wire Protocol"| Firestore[("Cloud Firestore Enterprise<br/>(MongoDB Compatibility)")]
     WebUI <-->|"MongoDB Wire Protocol"| Firestore
-    WebUI <-->|"Session & Telemetry Cache"| Memorystore[("Cloud Memorystore\n(Valkey / Redis)")]
-    UPF -->|"N6 Breakout"| NAT["Cloud NAT /\nExternal Data Network"]
-    GKE -.->|"libogsmetrics (:9090)"| GMP["Google Cloud Managed\nService for Prometheus"]
+    WebUI <-->|"Session & Telemetry Cache"| Memorystore[("Cloud Memorystore<br/>(Valkey / Redis)")]
+    UPF -->|"N6 Breakout"| NAT["Cloud NAT /<br/>External Data Network"]
+    CP -.->|"libogsmetrics (:9090)"| GMP["Google Cloud Managed<br/>Service for Prometheus"]
+    UPF -.->|"libogsmetrics (:9090)"| GMP
 ```
 
 ### Key GCP Native Service Mappings

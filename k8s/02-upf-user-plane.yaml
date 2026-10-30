@@ -8,6 +8,25 @@
 #   - net3 : N6 External Data Network Breakout (via Cloud NAT)
 #   - ogstun : Kernel TUN interface for UE Pool (10.45.0.0/16)
 # ==============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-upf
+  namespace: open5gs
+spec:
+  clusterIP: None
+  selector:
+    nf: upf
+  ports:
+    - name: n3-gtpu
+      port: 2152
+      targetPort: 2152
+      protocol: UDP
+    - name: n4-pfcp
+      port: 8805
+      targetPort: 8805
+      protocol: UDP
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

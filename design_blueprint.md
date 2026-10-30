@@ -391,17 +391,19 @@ Open5GS requires network separation across signaling (`N2`), user plane (`N3`), 
    gcloud compute networks subnets create subnet-n6 \
      --network=vpc-n6-dn --region=us-central1 --range=10.60.0.0/24
    ```
-3. **Configure Firewall Rules for 3GPP Protocols (`SCTP :38412`, `UDP :2152`, `UDP :8805`)**:
+3. **Configure Firewall Rules for 3GPP Protocols (`SCTP :38412/:36412/:29118`, `UDP :2152`, `UDP :8805`, `UDP :2123`)**:
    ```bash
-   # Allow N2 NGAP over SCTP (IP Protocol 132) from RAN CIDR
-   gcloud compute firewall-rules create allow-n2-sctp \
-     --network=vpc-n2-signaling --allow=sctp:38412 --source-ranges=172.16.0.0/16
+   # Allow N2 NGAP (38412), S1-MME S1AP (36412), SGsAP (29118) over SCTP & N26/S11/S5c GTPv2-C (2123) over UDP
+   gcloud compute firewall-rules create allow-n2-s1mme-sctp \
+     --network=vpc-n2-signaling \
+     --allow=sctp:38412,sctp:36412,sctp:29118,udp:2123 \
+     --source-ranges=172.16.0.0/16,10.20.0.0/24
 
-   # Allow N3 GTP-U over UDP :2152 from RAN CIDR
+   # Allow N3 / S1-U GTP-U over UDP :2152 from RAN CIDR
    gcloud compute firewall-rules create allow-n3-gtpu \
-     --network=vpc-n3-userplane --allow=udp:2152 --source-ranges=172.16.0.0/16
+     --network=vpc-n3-userplane --allow=udp:2152 --source-ranges=172.16.0.0/16,10.30.0.0/24
 
-   # Allow N4 PFCP over UDP :8805 between SMF and UPF
+   # Allow N4 / Sxa PFCP over UDP :8805 between SMF/SGW-C and UPF/SGW-U
    gcloud compute firewall-rules create allow-n4-pfcp \
      --network=vpc-n4-pfcp --allow=udp:8805 --source-ranges=10.40.0.0/24
    ```
@@ -419,9 +421,16 @@ Open5GS requires network separation across signaling (`N2`), user plane (`N3`), 
      --type=mongodb-compatible \
      --edition=enterprise
    ```
-2. **Create Cloud Memorystore for Valkey Instance** (for NMS sessions & caching):
+2. **Create Cloud Memorystore Instance** (for NMS sessions, policy cache, & UDSF state):
    ```bash
-   gcloud memcache/redis/valkey ... # Or via Terraform google_memorystore_instance
+   gcloud redis instances create open5gs-inmemory-cache \
+     --project=${PROJECT_ID} \
+     --region=us-central1 \
+     --tier=standard \
+     --size=5 \
+     --network=vpc-sbi-mgmt \
+     --redis-version=redis_7_2 \
+     --transit-encryption-mode=server-authentication
    ```
 3. **Store Database URI & mTLS Certificates in Secret Manager**:
    ```bash
@@ -444,19 +453,21 @@ Open5GS requires network separation across signaling (`N2`), user plane (`N3`), 
      --workload-pool=${PROJECT_ID}.svc.id.goog \
      --enable-managed-prometheus \
      --machine-type=n2-standard-8 \
-     --num-nodes=2
+     --node-labels=5g-plane=control-plane-sba \
+     --num-nodes=1
    ```
 2. **Create the Dedicated User Plane (UPF) & Multi-NIC Node Pool**:
-   - Uses `c3-standard-8` with `GVNIC` and attaches the additional VPC networks (`vpc-n2-signaling`, `vpc-n3-userplane`, `vpc-n4-pfcp`, `vpc-n6-dn`) at the VM level.
+   - Uses `c3-standard-8` with `GVNIC`, `--can-ip-forward`, and attaches the additional VPC networks (`vpc-n2-signaling`, `vpc-n3-userplane`, `vpc-n4-pfcp`, `vpc-n6-dn`) at the VM level.
    ```bash
-   gcloud container node-pools create upf-multinic-pool \
+   gcloud container node-pools create upf-amf-multinic-pool \
      --cluster=open5gs-5gc-cluster \
      --region=us-central1 \
      --machine-type=c3-standard-8 \
-     -- image-type=UBUNTU_CONTAINERD \
-     --gvnic \
+     --image-type=UBUNTU_CONTAINERD \
+     --enable-gvnic \
+     --can-ip-forward \
      --num-nodes=1 \
-     --node-labels=workload=5g-dataplane \
+     --node-labels=5g-plane=multinic-dataplane \
      --additional-node-network=network=vpc-n2-signaling,subnetwork=subnet-n2 \
      --additional-node-network=network=vpc-n3-userplane,subnetwork=subnet-n3 \
      --additional-node-network=network=vpc-n4-pfcp,subnetwork=subnet-n4 \
@@ -593,12 +604,12 @@ Deploying an open-source 5G Core (Open5GS) 100% inside a public cloud region int
 
 | Component Tier | GKE Node Pool / GCP Resource | Sizing Specification | Estimated Monthly GCP Cost (us-central1, On-Demand) |
 | :--- | :--- | :--- | :--- |
-| **Control Plane Node Pool** (`AMF`, `SMF`, `NRF`, `SCP`, `AUSF`, `UDM`, `UDR`, `PCF`, `NSSF`, `BSF`, `SEPP`, `WebUI`) | `n2-standard-8` (8 vCPU, 32 GB RAM) $\times$ 2 Nodes (Multi-Zone HA) | `Num Nodes = ceil(Total CP Pod CPU / 6.5 allocatable vCPU)` | ~\$495 / month (Eligible for 1-yr / 3-yr CUDs up to 55% off) |
-| **User Plane Node Pool** (`UPF` Multi-NIC Dataplane) | `c3-standard-8` (8 vCPU, 32 GB RAM, gVNIC) $\times$ 2 Nodes (Active/Active Sharded) | Supports ~3–5 Gbps aggregate GTP-U throughput per node | ~\$590 / month |
+| **Control Plane Node Pool** (`NRF`, `SCP`, `AUSF`, `UDM`, `UDR`, `PCF`, `NSSF`, `BSF`, `SEPP`, `HSS`, `PCRF`, `WebUI`, `dbctl`, `ueransim-ue`) | `n2-standard-8` (8 vCPU, 32 GB RAM) $\times$ 2 Nodes (Multi-Zone HA) | `Num Nodes = ceil(Total CP Pod CPU / 6.5 allocatable vCPU)` | ~\$495 / month (Eligible for 1-yr / 3-yr CUDs up to 55% off) |
+| **Multi-NIC User & Access Plane Node Pool** (`UPF+PGW-U`, `SGW-U`, `AMF`, `SMF+PGW-C`, `MME`, `SGW-C`, `ueransim-gnb`) | `c3-standard-8` (8 vCPU, 32 GB RAM, gVNIC) $\times$ 2 Nodes (Active/Active Sharded) | Supports ~3–5 Gbps aggregate GTP-U throughput per node | ~\$590 / month |
 | **Subscriber & Policy DB** | **Cloud Firestore Enterprise (MongoDB Compatibility)** | 10,000 subscriber docs (<1 GB storage) + ~500 ops/sec | ~\$50 – \$120 / month (Pay-per-op / provisioned throughput) |
 | **In-Memory Cache** | **Cloud Memorystore for Valkey** | `M1` / `Standard-HA` (5 GB, Multi-Zone) | ~\$160 / month |
 | **NMS Security & Observability** | **Cloud Load Balancing + IAP + GMP + Cloud Logging** | 1 External ALB + ~150 Prometheus time series | ~\$85 / month |
-| **Total Estimated Core Run-Rate** | *Excludes Cloud Interconnect / HA VPN data egress* | **Complete 5G SA Core + NMS** | **~\$1,380 – \$1,450 / month** |
+| **Total Estimated Core Run-Rate** | *Excludes Cloud Interconnect / HA VPN data egress* | **Complete 5GS + EPC Core + NMS + Simulator** | **~\$1,380 – \$1,450 / month** |
 
 ### B. Security & Telco Guardrails
 1. **Service-Based Interface (SBI) mTLS**: Enable TLS 1.3 (`use_tls: true` in Open5GS `sbi:` config blocks) across all HTTP/2 NFs using certificates issued by **Google Cloud Certificate Authority Service (CAS)** and mounted via **Secret Manager CSI Driver**.
@@ -610,7 +621,9 @@ Deploying an open-source 5G Core (Open5GS) 100% inside a public cloud region int
 
 ## 5. Reference Code & Manifests in This Workspace
 
-The companion starter templates for deploying this blueprint are included in this repository:
+The companion starter templates and reviewed implementation plan for deploying this blueprint are included in this repository:
+- **Engineering Plan & Audit Review**:
+  - [implementation_plan.md](file:///usr/local/google/home/pangyun/Projects/open5gs/implementation_plan.md): Reviewed technical implementation plan, section-by-section blueprint walkthrough, and audit verification matrix.
 - **Terraform Infrastructure (`terraform/`)**:
   - [variables.tf](file:///usr/local/google/home/pangyun/Projects/open5gs/terraform/variables.tf): Parameterized GCP project, region, PLMN (`mcc`/`mnc`), and multi-VPC CIDR blocks.
   - [main.tf](file:///usr/local/google/home/pangyun/Projects/open5gs/terraform/main.tf): Multi-VPC networks (`MTU 8896` on `N3`/`N4`), SCTP/GTP-U/PFCP firewall rules, GKE Standard Regional Cluster with Dataplane V2 Multi-Networking, C3 Multi-NIC UPF Node Pool, Cloud Firestore (MongoDB Compatibility), and Cloud Memorystore.

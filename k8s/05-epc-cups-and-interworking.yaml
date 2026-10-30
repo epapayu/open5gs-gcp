@@ -269,6 +269,25 @@ spec:
               protocol: UDP
 ---
 # 5. SGW-U (Serving Gateway User Plane - S1-U/S5u GTP-U :2152 & Sxa PFCP :8805)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-sgwu
+  namespace: open5gs
+spec:
+  clusterIP: None
+  selector:
+    nf: sgwu
+  ports:
+    - name: s1u-s5u-gtpu
+      port: 2152
+      targetPort: 2152
+      protocol: UDP
+    - name: sxa-pfcp
+      port: 8805
+      targetPort: 8805
+      protocol: UDP
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

@@ -162,6 +162,20 @@ spec:
               name: sbi
 ---
 # 4. UDM (Unified Data Management) & AUSF (Authentication Server Function)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-udm
+  namespace: open5gs
+spec:
+  selector:
+    nf: udm
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -187,6 +201,20 @@ spec:
           ports:
             - containerPort: 7777
               name: sbi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-ausf
+  namespace: open5gs
+spec:
+  selector:
+    nf: ausf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -215,6 +243,20 @@ spec:
               name: sbi
 ---
 # 5. PCF (Policy Control Function), NSSF (Slice Selection), BSF (Binding), SEPP (Roaming)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-pcf
+  namespace: open5gs
+spec:
+  selector:
+    nf: pcf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -250,6 +292,20 @@ spec:
             - containerPort: 9090
               name: metrics
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-nssf
+  namespace: open5gs
+spec:
+  selector:
+    nf: nssf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -275,6 +331,20 @@ spec:
           ports:
             - containerPort: 7777
               name: sbi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-bsf
+  namespace: open5gs
+spec:
+  selector:
+    nf: bsf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -302,6 +372,24 @@ spec:
             - containerPort: 7777
               name: sbi
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-sepp
+  namespace: open5gs
+spec:
+  selector:
+    nf: sepp
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+    - name: n32-prins
+      port: 7778
+      targetPort: 7778
+      appProtocol: kubernetes.io/h2c
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -323,14 +411,33 @@ spec:
       containers:
         - name: seppd
           image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-seppd", "-c", "/etc/open5gs/sepp.yaml"]
+          command: ["open5gs-seppd", "-c", "/etc/open5gs/sepp1.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
             - containerPort: 7778
               name: n32-prins
 ---
-# 6. AMF (Access and Mobility Management Function - Multi-NIC: eth0=SBI, net1=N2 SCTP)
+# 6. AMF (Access and Mobility Management Function - Multi-NIC: eth0=SBI/N26, net1=N2 SCTP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-amf
+  namespace: open5gs
+spec:
+  clusterIP: None
+  selector:
+    nf: amf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+    - name: n26-gtpc
+      port: 2123
+      targetPort: 2123
+      protocol: UDP
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -368,6 +475,9 @@ spec:
             - containerPort: 38412
               name: n2-ngap-sctp
               protocol: SCTP
+            - containerPort: 2123
+              name: n26-gtpc
+              protocol: UDP
             - containerPort: 9090
               name: metrics
               protocol: TCP
@@ -379,7 +489,30 @@ spec:
               cpu: "2000m"
               memory: "2Gi"
 ---
-# 7. SMF (Session Management Function - Multi-NIC: eth0=SBI, net1=N4 PFCP)
+# 7. SMF + PGW-C (Session Management Function - Multi-NIC: eth0=SBI/S5c/Gx, net1=N4 PFCP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-smf
+  namespace: open5gs
+spec:
+  clusterIP: None
+  selector:
+    nf: smf
+  ports:
+    - name: http2-sbi
+      port: 7777
+      targetPort: 7777
+      appProtocol: kubernetes.io/h2c
+    - name: s5c-gtpc
+      port: 2123
+      targetPort: 2123
+      protocol: UDP
+    - name: gx-diameter
+      port: 3868
+      targetPort: 3868
+      protocol: TCP
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

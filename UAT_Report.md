@@ -10,8 +10,8 @@
 | **Subscriber Data Tier** | Cloud Firestore Enterprise (MongoDB Compatibility API, `us-central1`) via `open5gs-firestore-proxy` |
 | **NMS WebUI Ingress** | `ingress/open5gs-nms-ingress` (GCE External Application Load Balancer + Cloud Armor WAF + Cookie Affinity) |
 | **Cloud Monitoring Dashboard** | `"Open5GS"` Custom Dashboard (Google Cloud Monitoring + Managed Service for Prometheus) |
-| **Test Execution Timestamp** | `2026-11-03 06:15 UTC` |
-| **Overall UAT Status** | **PASS (`21 / 21` Workloads Verified — `15` Deployments & `6` StatefulSets)** |
+| **Test Execution Timestamp** | `2026-11-03 07:42 UTC` |
+| **Overall UAT Status** | **PASS (`21 / 21` Workloads Verified + E2E 5G UE Speedtest: `623.87 Mbps` DL / `329.09 Mbps` UL / `1.93 ms` RTT)** |
 
 ---
 
@@ -20,9 +20,11 @@
 1. [Cloud Monitoring "Open5GS" Dashboard Snapshots](#1-cloud-monitoring-open5gs-dashboard-snapshots)
 2. [Open5GS NMS WebUI & UE Subscriber Profile Snapshot](#2-open5gs-nms-webui--ue-subscriber-profile-snapshot)
 3. [Functional Test Results for All Deployments & StatefulSets (`21/21`)](#3-functional-test-results-for-all-deployments--statefulsets-2121)
+   - [3.22 End-to-End 5G User-Plane Speedtest (Simulated UE)](#322-end-to-end-5g-user-plane-speedtest-simulated-ue)
 4. [Step-by-Step Test Execution Procedures (SOP)](#4-step-by-step-test-execution-procedures-sop)
    - [4.1 Procedure for Item 2: Registering the UE Subscriber Profile in NMS WebUI & Attaching the UE](#41-procedure-for-item-2-registering-the-ue-subscriber-profile-in-nms-webui--attaching-the-ue)
    - [4.2 Procedure for Item 3: Executing Functional Tests Across All Deployments & StatefulSets](#42-procedure-for-item-3-executing-functional-tests-across-all-deployments--statefulsets)
+   - [4.3 Procedure for Executing the End-to-End 5G UE Speedtest](#43-procedure-for-executing-the-end-to-end-5g-ue-speedtest)
 
 ---
 
@@ -569,6 +571,102 @@ Every Kubernetes `Deployment` (`15`) and `StatefulSet` (`6`) in namespace `open5
 
 ---
 
+### 3.22 End-to-End 5G User-Plane Speedtest (Simulated UE)
+
+To validate sustained user-plane throughput, latency, jitter, and GTP-U packet encapsulation under load, a live external internet speedtest was executed from `deploy/ueransim-ue` bound strictly to the 5G PDU Session interface (`--interface uesimtun0`, `10.45.0.3`, `MTU 1400`) against Cloudflare's HTTPS benchmark endpoints (`speed.cloudflare.com`, `colo=ORD`, TLS 1.3).
+
+- **Verified End-to-End 5G Data Path**:
+  `ueransim-ue (uesimtun0: 10.45.0.3)` → `NR-Uu` → `ueransim-gnb` → `N3 GTP-U (:2152, vpc-n3-userplane, MTU 8896)` → `open5gs-upf-0 (ogstun on c3-standard-8 + gVNIC)` → `N6 (net3, vpc-n6-dn)` → `Cloud NAT (open5gs-n6-nat)` → `Public Internet`
+
+#### Speedtest Results Summary
+
+| Metric | Test Configuration (`--interface uesimtun0`) | Measured Result | Status |
+| :--- | :--- | :--- | :---: |
+| **Ping Latency (Avg / Min / Max)** | `10` ICMP packets to `8.8.8.8` (`0.2s` interval) | **`1.93 ms`** (`1.79 ms` / `2.62 ms`) | **PASS** |
+| **Jitter (`mdev`) & Packet Loss** | `10` ICMP packets over `uesimtun0` | **`0.23 ms`** jitter • **`0%`** packet loss | **PASS** |
+| **Download Speed (Single-Stream)** | `50 MB` HTTPS (`speed.cloudflare.com/__down`) | **`401.74 Mbps`** (`0.996 s`, TTFB `197 ms`) | **PASS** |
+| **Download Speed (4 Parallel Streams)** | `4 × 50 MB` (`200 MB` total HTTPS) | **`623.87 Mbps`** (`2.565 s`) | **PASS** |
+| **Upload Speed (Single-Stream)** | `50 MiB` HTTPS POST (`speed.cloudflare.com/__up`) | **`260.58 Mbps`** (`1.610 s`) | **PASS** |
+| **Upload Speed (4 Parallel Streams)** | `4 × 25 MiB` (`100 MiB` total HTTPS POST) | **`329.09 Mbps`** (`2.549 s`) | **PASS** |
+| **UPF `ogstun` GTP-U Payload Verified** | Kernel `RX` + `TX` delta on `open5gs-upf-0` | **`460.31 MB`** (`386,380` pkts, `0` errors) | **PASS** |
+
+- **Commands**:
+  ```bash
+  # 1. Baseline UPF ogstun packet/byte counters before speedtest
+  kubectl -n open5gs exec open5gs-upf-0 -c upfd -- ip -s link show ogstun
+
+  # 2. ICMP Latency & Jitter over uesimtun0
+  kubectl -n open5gs exec deploy/ueransim-ue -- ping -I uesimtun0 -c 10 -i 0.2 8.8.8.8
+
+  # 3. Single-Stream (50 MB) & Multi-Stream (4x 50 MB = 200 MB) HTTPS Download via uesimtun0
+  kubectl -n open5gs exec deploy/ueransim-ue -- curl -s --interface uesimtun0 -o /dev/null \
+    -w "HTTP: %{http_code} | Downloaded: %{size_download} bytes | Time: %{time_total}s | TTFB: %{time_starttransfer}s | Speed: %{speed_download} B/s\n" \
+    "https://speed.cloudflare.com/__down?bytes=50000000"
+
+  kubectl -n open5gs exec deploy/ueransim-ue -- sh -c '
+    start=$(date +%s%N)
+    for i in 1 2 3 4; do
+      curl -s --interface uesimtun0 -o /dev/null "https://speed.cloudflare.com/__down?bytes=50000000" &
+    done
+    wait
+    end=$(date +%s%N)
+    awk -v s="$start" -v e="$end" "BEGIN { dt=(e-s)/1e9; mbps=(200000000*8)/(dt*1e6); printf \"Total: 200 MB | Elapsed: %.3fs | Aggregate Download: %.2f Mbps\n\", dt, mbps }"
+  '
+
+  # 4. Single-Stream (50 MiB) & Multi-Stream (4x 25 MiB = 100 MiB) HTTPS Upload via uesimtun0
+  kubectl -n open5gs exec deploy/ueransim-ue -- sh -c '
+    dd if=/dev/zero bs=1M count=50 2>/dev/null | curl -s --interface uesimtun0 -X POST --data-binary @- -o /dev/null \
+      -w "Uploaded: %{size_upload} bytes | Time: %{time_total}s | Speed: %{speed_upload} B/s\n" "https://speed.cloudflare.com/__up"
+  '
+
+  kubectl -n open5gs exec deploy/ueransim-ue -- sh -c '
+    dd if=/dev/zero of=/tmp/up25m.bin bs=1M count=25 2>/dev/null
+    start=$(date +%s%N)
+    for i in 1 2 3 4; do
+      curl -s --interface uesimtun0 -X POST --data-binary @/tmp/up25m.bin -o /dev/null "https://speed.cloudflare.com/__up" &
+    done
+    wait
+    end=$(date +%s%N)
+    rm -f /tmp/up25m.bin
+    awk -v s="$start" -v e="$end" "BEGIN { dt=(e-s)/1e9; mbps=(104857600*8)/(dt*1e6); printf \"Total: 100 MiB | Elapsed: %.3fs | Aggregate Upload: %.2f Mbps\n\", dt, mbps }"
+  '
+
+  # 5. Post-test UPF ogstun packet/byte counters confirming full N3 GTP-U traversal
+  kubectl -n open5gs exec open5gs-upf-0 -c upfd -- ip -s link show ogstun
+  ```
+- **Response Printout**:
+  ```text
+  # UPF ogstun (Before Speedtest)
+  2: ogstun: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1400 qdisc fq state UP mode DEFAULT group default qlen 500
+      link/none
+      RX: bytes  packets  errors  dropped missed  mcast
+      15119      167      0       0       0       0
+      TX: bytes  packets  errors  dropped carrier collsns
+      130514     185      0       0       0       0
+
+  # ICMP Ping Latency & Jitter (10 packets, 0.2s interval)
+  PING 8.8.8.8 (8.8.8.8) from 10.45.0.3 uesimtun0: 56(84) bytes of data.
+  10 packets transmitted, 10 received, 0% packet loss, time 1810ms
+  rtt min/avg/max/mdev = 1.786/1.933/2.620/0.232 ms
+
+  # HTTPS Download & Upload Speedtests (Cloudflare colo=ORD, TLSv1.3)
+  HTTP: 200 | Downloaded: 50000000 bytes | Time: 0.995678s | TTFB: 0.196694s | Speed: 50217038 B/s  (401.74 Mbps)
+  Total: 200 MB  | Elapsed: 2.565s | Aggregate Download: 623.87 Mbps
+  Uploaded: 52428800 bytes | Time: 1.609587s | Speed: 32572827 B/s                                  (260.58 Mbps)
+  Total: 100 MiB | Elapsed: 2.549s | Aggregate Upload: 329.09 Mbps
+
+  # UPF ogstun (After Speedtest)
+  2: ogstun: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1400 qdisc fq state UP mode DEFAULT group default qlen 500
+      link/none
+      RX: bytes  packets  errors  dropped missed  mcast
+      166206313  160003   0       0       0       0
+      TX: bytes  packets  errors  dropped carrier collsns
+      294254225  226729   0       168     0       0
+  ```
+- **Performance Observation**: Sustaining **`623.87 Mbps` downlink** and **`329.09 Mbps` uplink** at **`1.93 ms` RTT** confirms high-efficiency packet forwarding across the `c3-standard-8` (`gVNIC`) UPF node pool and `MTU 8896` `N3` VPC fabric, even with two userspace Linux `TUN` context switches (`uesimtun0` in `nr-ue` and `ogstun` in `open5gs-upfd`) plus userspace `NR-Uu` PDCP/RLC/GTP-U framing within the subscriber's `1 Gbps` UE-AMBR QoS profile.
+
+---
+
 ## 4. Step-by-Step Test Execution Procedures (SOP)
 
 This section provides repeatable procedures for testers to reproduce **Item 2** (provisioning a UE subscriber profile via the Open5GS NMS WebUI and attaching the UE) and **Item 3** (executing functional verification across every Deployment and StatefulSet).
@@ -686,3 +784,28 @@ Run HTTP/2 Prior-Knowledge (`--http2-prior-knowledge`) SBI requests inside the c
 #### Stage 6: Confirm Telemetry Ingestion on the Cloud Monitoring "Open5GS" Dashboard
 1. In the Google Cloud Console, navigate to **Monitoring -> Dashboards -> Open5GS** and set the time range to **Last 1 hour**.
 2. Confirm all 4 top-row scorecards (`Connected 5G gNodeBs (N2 SCTP) = 1`, `Active AMF UE Sessions = 1`, `Active SMF PDU Sessions (S-NSSAI) = 1`, `Active UPF User Plane Sessions (N4) = 1`), all `:9090` 3GPP counter charts, and all GKE Deployment/StatefulSet availability and resource charts populate with human-readable workload names and zero container restarts.
+
+---
+
+### 4.3 Procedure for Executing the End-to-End 5G UE Speedtest
+
+Follow these steps to reproduce the simulated 5G UE throughput and latency benchmark documented in [Section 3.22](#322-end-to-end-5g-user-plane-speedtest-simulated-ue):
+
+1. **Verify Active UE PDU Session Tunnel (`uesimtun0`)**:
+   ```bash
+   kubectl -n open5gs exec deploy/ueransim-ue -- ip -4 addr show dev uesimtun0
+   ```
+   - **Pass Criteria**: `uesimtun0` is `UP` with an assigned `10.45.0.x/32` IPv4 address (`mtu 1400`).
+2. **Record Baseline UPF `ogstun` Counters**:
+   ```bash
+   kubectl -n open5gs exec open5gs-upf-0 -c upfd -- ip -s link show ogstun
+   ```
+3. **Run ICMP Latency & Jitter Check**:
+   ```bash
+   kubectl -n open5gs exec deploy/ueransim-ue -- ping -I uesimtun0 -c 10 -i 0.2 8.8.8.8
+   ```
+   - **Pass Criteria**: `0% packet loss` and sub-`5 ms` average RTT.
+4. **Run Single-Stream & Parallel HTTPS Download/Upload Benchmarks**:
+   Execute the `curl --interface uesimtun0` commands in [Section 3.22](#322-end-to-end-5g-user-plane-speedtest-simulated-ue) against `https://speed.cloudflare.com/__down` and `https://speed.cloudflare.com/__up`. Always pass `--interface uesimtun0` so traffic is forced into the 5G PDU session tunnel rather than the pod's management `eth0` interface.
+5. **Confirm UPF `ogstun` Packet/Byte Counter Increment**:
+   Re-run `kubectl -n open5gs exec open5gs-upf-0 -c upfd -- ip -s link show ogstun` and confirm `RX` (uplink from UE) and `TX` (downlink to UE) byte counters increased by the full benchmark payload volume with `0` interface errors.

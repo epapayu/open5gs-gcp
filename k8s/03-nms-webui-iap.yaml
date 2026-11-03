@@ -13,6 +13,10 @@ spec:
   # Attach Google Cloud Armor WAF policy (provisioned via Terraform)
   securityPolicy:
     name: "open5gs-nms-cloud-armor-policy"
+  # Cookie-based session affinity for Express connect.sid + Lusca CSRF tokens
+  sessionAffinity:
+    affinityType: "GENERATED_COOKIE"
+    affinityCookieTtlSec: 86400
   # Note: Enable IAP below once an OAuth 2.0 Client Secret (open5gs-iap-oauth-secret)
   # and custom domain ManagedCertificate are configured:
   # iap:
@@ -52,7 +56,7 @@ metadata:
     app.kubernetes.io/part-of: open5gs-5gc
     app: open5gs-webui
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: open5gs-webui

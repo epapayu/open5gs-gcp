@@ -623,17 +623,17 @@ Deploying an open-source 5G Core (Open5GS) 100% inside a public cloud region int
 
 The companion starter templates and reviewed implementation plan for deploying this blueprint are included in this repository:
 - **Engineering Plan & Audit Review**:
-  - [implementation_plan.md](file:///usr/local/google/home/pangyun/Projects/open5gs/implementation_plan.md): Reviewed technical implementation plan, section-by-section blueprint walkthrough, and audit verification matrix.
+  - [implementation_plan.md](implementation_plan.md): Reviewed technical implementation plan, section-by-section blueprint walkthrough, and audit verification matrix.
 - **Terraform Infrastructure (`terraform/`)**:
-  - [variables.tf](file:///usr/local/google/home/pangyun/Projects/open5gs/terraform/variables.tf): Parameterized GCP project, region, PLMN (`mcc`/`mnc`), and multi-VPC CIDR blocks.
-  - [main.tf](file:///usr/local/google/home/pangyun/Projects/open5gs/terraform/main.tf): Multi-VPC networks (`MTU 8896` on `N3`/`N4`), SCTP/GTP-U/PFCP firewall rules, GKE Standard Regional Cluster with Dataplane V2 Multi-Networking, C3 Multi-NIC UPF Node Pool, Cloud Firestore (MongoDB Compatibility), and Cloud Memorystore.
+  - [variables.tf](terraform/variables.tf): Parameterized GCP project, region, PLMN (`mcc`/`mnc`), and multi-VPC CIDR blocks.
+  - [main.tf](terraform/main.tf): Multi-VPC networks (`MTU 8896` on `N3`/`N4`), SCTP/GTP-U/PFCP firewall rules, GKE Standard Regional Cluster with Dataplane V2 Multi-Networking, C3 Multi-NIC UPF Node Pool, Cloud Firestore (MongoDB Compatibility), and Cloud Memorystore.
 - **Kubernetes Manifests (`k8s/`)**:
-  - [00-namespace-and-networks.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/00-namespace-and-networks.yaml): `open5gs` namespace and GKE Multi-Network `Network` / `GKENetworkParamSet` CRDs for `N2`, `N3`, `N4`, and `N6`.
-  - [01-control-plane-sba.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/01-control-plane-sba.yaml): Full 3GPP SBA Control Plane deployments (`NRF`, `SCP`, `UDR`, `UDM`, `AUSF`, `PCF`, `NSSF`, `BSF`, `SEPP`, `SMF`, `AMF`) + `PodMonitoring` for Google Cloud Managed Service for Prometheus.
-  - [02-upf-user-plane.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/02-upf-user-plane.yaml): Multi-NIC `open5gs-upfd` deployment with `ogstun` kernel TUN initialization, `CAP_NET_ADMIN`, and N6 NAT masquerading.
-  - [03-nms-webui-iap.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/03-nms-webui-iap.yaml): Open5GS WebUI NMS deployment backed by Firestore & Memorystore and secured behind Google Cloud Load Balancing, Cloud Armor, and Identity-Aware Proxy (IAP).
-  - [04-ueransim-ran-ue-simulator.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/04-ueransim-ran-ue-simulator.yaml): End-to-end 5G SA RAN (`ueransim-gnb`) and UE (`ueransim-ue`) simulation pods + Open5GS native C protocol conformance `Job` (`open5gs-native-5gc-conformance-test`).
-  - [05-epc-cups-and-interworking.yaml](file:///usr/local/google/home/pangyun/Projects/open5gs/k8s/05-epc-cups-and-interworking.yaml): Complete 4G EPC CUPS & 5G NSA / `N26` Interworking plane (`MME`, `HSS`, `PCRF`, `SGW-C`, `SGW-U`), `freeDiameter` Diameter services (`S6a`, `Gx`, `Rx`, `Cx`), and the `open5gs-dbctl` automated CLI subscriber provisioning `Job`.
+  - [00-namespace-and-networks.yaml](k8s/00-namespace-and-networks.yaml): `open5gs` namespace and GKE Multi-Network `Network` / `GKENetworkParamSet` CRDs for `N2`, `N3`, `N4`, and `N6`.
+  - [01-control-plane-sba.yaml](k8s/01-control-plane-sba.yaml): Full 3GPP SBA Control Plane deployments (`NRF`, `SCP`, `UDR`, `UDM`, `AUSF`, `PCF`, `NSSF`, `BSF`, `SEPP`, `SMF`, `AMF`) + `PodMonitoring` for Google Cloud Managed Service for Prometheus.
+  - [02-upf-user-plane.yaml](k8s/02-upf-user-plane.yaml): Multi-NIC `open5gs-upfd` deployment with `ogstun` kernel TUN initialization, `CAP_NET_ADMIN`, and N6 NAT masquerading.
+  - [03-nms-webui-iap.yaml](k8s/03-nms-webui-iap.yaml): Open5GS WebUI NMS deployment backed by Firestore & Memorystore and secured behind Google Cloud Load Balancing, Cloud Armor, and Identity-Aware Proxy (IAP).
+  - [04-ueransim-ran-ue-simulator.yaml](k8s/04-ueransim-ran-ue-simulator.yaml): End-to-end 5G SA RAN (`ueransim-gnb`) and UE (`ueransim-ue`) simulation pods + Open5GS native C protocol conformance `Job` (`open5gs-native-5gc-conformance-test`).
+  - [05-epc-cups-and-interworking.yaml](k8s/05-epc-cups-and-interworking.yaml): Complete 4G EPC CUPS & 5G NSA / `N26` Interworking plane (`MME`, `HSS`, `PCRF`, `SGW-C`, `SGW-U`), `freeDiameter` Diameter services (`S6a`, `Gx`, `Rx`, `Cx`), and the `open5gs-dbctl` automated CLI subscriber provisioning `Job`.
 
 ---
 

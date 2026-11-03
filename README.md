@@ -52,6 +52,7 @@ flowchart LR
 ├── README.md                                 # Repository overview and quickstart guide
 ├── design_blueprint.md                       # Comprehensive 5G Principal Architect Design Blueprint
 ├── implementation_plan.md                    # Reviewed Technical Implementation Plan & Audit Walkthrough
+├── walkthrough.md                            # Live GCP Deployment & End-to-End 5G SA Verification Walkthrough
 ├── .gitignore                                # Excludes Terraform state, GCP credentials, and SIM keys
 ├── terraform/
 │   ├── main.tf                               # Multi-VPC (SBI, N2, N3, N4, N6), GKE Dataplane V2, Firestore, Memorystore

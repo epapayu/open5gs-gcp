@@ -62,3 +62,7 @@ Thumbs.db
 __pycache__/
 *.pyc
 node_modules/
+
+# 6. Internal Planning & Scratch Artifacts
+implementation_plan.md
+implementations_plan.md

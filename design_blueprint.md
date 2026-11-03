@@ -622,9 +622,10 @@ Deploying an open-source 5G Core (Open5GS) 100% inside a public cloud region int
 
 ## 5. Reference Code & Manifests in This Workspace
 
-The companion starter templates and reviewed implementation plan for deploying this blueprint are included in this repository:
-- **Engineering Plan & Audit Review**:
-  - [implementation_plan.md](implementation_plan.md): Reviewed technical implementation plan, section-by-section blueprint walkthrough, and audit verification matrix.
+The companion starter templates, verification walkthrough, and UAT documentation for deploying this blueprint are included in this repository:
+- **Deployment Walkthrough & UAT Documentation**:
+  - [walkthrough.md](walkthrough.md): Live GCP deployment and end-to-end 5G SA verification walkthrough.
+  - [UAT_Report.md](UAT_Report.md): User Acceptance Testing (UAT) report, Cloud Monitoring & NMS WebUI snapshots, and test procedures.
 - **Terraform Infrastructure (`terraform/`)**:
   - [variables.tf](terraform/variables.tf): Parameterized GCP project, region, PLMN (`mcc`/`mnc`), and multi-VPC CIDR blocks.
   - [main.tf](terraform/main.tf): Multi-VPC networks (`MTU 8896` on `N3`/`N4`), SCTP/GTP-U/PFCP firewall rules, GKE Standard Regional Cluster with Dataplane V2 Multi-Networking, C3 Multi-NIC UPF Node Pool, Cloud Firestore (MongoDB Compatibility), and Cloud Memorystore.

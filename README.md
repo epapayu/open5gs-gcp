@@ -45,6 +45,25 @@ flowchart LR
 
 ---
 
+## Live Deployment & Cloud Monitoring Snapshots
+
+### 1. GKE Workloads Overview (`23 / 23` Workloads Healthy in `open5gs-5gc-cluster`)
+All `15` Deployments, `6` Multi-NIC StatefulSets, and `2` Verification/Seed Jobs running in namespace `open5gs`:
+
+![GKE Workloads Overview — 23/23 Open5GS, Firestore Proxy, WebUI & UERANSIM Workloads Healthy](assets/gke_workloads_overview.jpg)
+
+### 2. Cloud Monitoring `"Open5GS"` Dashboard — 3GPP Prometheus Telemetry (`:9090/metrics`)
+Real-time `AMF`, `SMF`, `UPF`, `PCF`, and `MME` scorecards and `:9090/metrics` time-series scraped every `15s` via Google Cloud Managed Service for Prometheus:
+
+![Open5GS Cloud Monitoring Dashboard — Part 1: 3GPP Prometheus :9090/metrics Telemetry](assets/readme_monitoring_prometheus.jpg)
+
+### 3. Cloud Monitoring `"Open5GS"` Dashboard — GKE Deployments, StatefulSets & Cluster Health
+Controller-labeled replica availability, active container counts, CPU/memory usage, pod `RX`/`TX` throughput (capturing live simulated 5G UE speedtest traffic), `0` container restarts, `kube-apiserver` P99 latency, and node pool utilization:
+
+![Open5GS Cloud Monitoring Dashboard — Part 2: GKE Deployments, StatefulSets & Cluster Health](assets/readme_monitoring_gke_health.jpg)
+
+---
+
 ## Repository Structure
 
 ```text

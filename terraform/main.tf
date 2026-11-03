@@ -271,9 +271,22 @@ resource "google_container_cluster" "open5gs_cluster" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
-  # Native Google Cloud Managed Service for Prometheus (GMP) for NMS Telemetry
+  # Native Google Cloud Managed Service for Prometheus (GMP) & GKE Workload/Deployment Telemetry
   monitoring_config {
-    enable_components = ["SYSTEM_COMPONENTS"]
+    enable_components = [
+      "SYSTEM_COMPONENTS",
+      "APISERVER",
+      "SCHEDULER",
+      "CONTROLLER_MANAGER",
+      "STORAGE",
+      "HPA",
+      "POD",
+      "DAEMONSET",
+      "DEPLOYMENT",
+      "STATEFULSET",
+      "KUBELET",
+      "CADVISOR",
+    ]
     managed_prometheus {
       enabled = true
     }

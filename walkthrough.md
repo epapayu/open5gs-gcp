@@ -92,7 +92,15 @@ content-type: text/html; charset=ISO-8859-1
 server: gws
 ```
 
-### 3.4 Prometheus Telemetry (`:9090/metrics`) & NMS WebUI Ingress
+### 3.4 Prometheus Telemetry (`:9090/metrics`), Google Cloud Monitoring Dashboard (`"Open5GS"`), & NMS WebUI Ingress
+- **Google Cloud Monitoring Dashboard (`"Open5GS"`)** ([`terraform/monitoring_dashboard.tf`](terraform/monitoring_dashboard.tf)):
+  - Provisioned via `google_monitoring_dashboard.open5gs_dashboard` (`displayName = "Open5GS"`, 19 widgets across a 12-column `mosaicLayout`).
+  - **Open5GS `:9090/metrics` Section (Google Cloud Managed Service for Prometheus)**:
+    - 4 real-time executive scorecards (`Connected 5G gNodeBs`, `Active AMF UE Sessions`, `Active SMF PDU Sessions`, `Active UPF User Plane Sessions`).
+    - `:9090` scrape target health (`up`), AMF 5G-AKA registration & authentication rates, AMF/MME registered UEs & RAN peers, SMF PDU sessions & QoS flows by S-NSSAI/5QI, UPF `N3` GTP-U uplink/downlink packet rates & active QoS flows by DNN, PCF policy associations & `N4` PFCP session procedures, and native `libogsmetrics` NF process resident memory (`process_resident_memory_bytes`) & open file descriptors (`process_open_fds`).
+  - **GKE Deployments, StatefulSets & Cluster Health Section (`open5gs-5gc-cluster`)**:
+    - Enabled GKE monitoring components `SYSTEM_COMPONENTS`, `APISERVER`, `SCHEDULER`, `CONTROLLER_MANAGER`, `STORAGE`, `HPA`, `POD`, `DAEMONSET`, `DEPLOYMENT`, `STATEFULSET`, `KUBELET`, and `CADVISOR`.
+    - Tracks `kube_deployment_status_replicas_available` + `kube_statefulset_status_replicas_ready` across all 20 Open5GS/NMS/UERANSIM workloads in namespace `open5gs`, active running containers (`kubernetes.io/container/uptime`), per-Deployment/StatefulSet CPU cores, memory bytes, pod `RX`/`TX` network throughput, container restart rate, **GKE Control Plane API Server P99 latency** (`apiserver_request_duration_seconds`), and node CPU/memory allocatable utilization across `sba-control-plane-pool` and `upf-amf-multinic-pool`.
 - **AMF Metrics**: `gnb 1`, `amf_session 1`
 - **SMF Metrics**: `ues_active 1`, `fivegs_smffunction_sm_sessionnbr{plmnid="99970",snssai="1-010203"} 1`, `fivegs_smffunction_sm_qos_flow_nbr{plmnid="99970",snssai="1-010203",fiveqi="9"} 1`
 - **UPF Metrics**: `fivegs_upffunction_sm_n4sessionestabreq 1`, `fivegs_upffunction_upf_sessionnbr 1`, `fivegs_upffunction_upf_qosflows{dnn="internet"} 1`
@@ -106,3 +114,5 @@ server: gws
 2. **GKE Dataplane V2 L3 Multi-Networking**: Configured `secondary_ip_range` blocks (`pods-n2`, `pods-n3`, `pods-n4`, `pods-n6`), `additional_pod_network_configs` on `upf-amf-multinic-pool`, `podIPv4Ranges` in each `GKENetworkParamSet`, and `networking.gke.io/default-interface: "eth0"` on all Multi-NIC pods (`amf`, `smf`, `upf`, `mme`, `sgwc`, `sgwu`, `ueransim-gnb`).
 3. **Cloud Firestore MongoDB Wire-Protocol Compatibility**: Deployed `open5gs-firestore-proxy` to adapt legacy `libmongoc` (<1.20) and Mongoose v5 `OP_QUERY` handshakes to Cloud Firestore's `OP_MSG` (`hello: 1, loadBalanced: true`) over TLS `:443` with `retryWrites=false`.
 4. **3GPP TS 29.510 NRF NF-Discovery Authorization**: Configured `open5gs-native-5gc-conformance-test` to query `nnrf-disc` using authorized `requester-nf-type` roles (`UDM` for `UDR`, `PCF` for `BSF`, `AMF` for SBA peers).
+5. **Open5GS v2.7.2 `:9090/metrics` Target Scoping**: Removed `metrics: enabled` from `open5gs-pcrf` (as `open5gs-pcrfd` v2.7.2 does not bind `libogsmetrics` `:9090`) and scoped `up/gauge` and `process_*` queries to `resource.label."job"="open5gs-nf-metrics"` so all 6 active Open5GS Prometheus targets (`amf`, `smf`, `upf`, `pcf` x2, `mme`) report `up = 1` cleanly without mixing `kube-state-metrics` targets.
+6. **Google Cloud Monitoring `legendTemplate` Label Resolution**: Configured plural `${metric.labels.<key>}` and `${resource.labels.<key>}` paths along with escaped-dot system metadata keys (`${metadata.system_labels\.top_level_controller_type}/${metadata.system_labels\.top_level_controller_name}`) across all 13 `xyChart` widgets in [`terraform/monitoring_dashboard.tf`](terraform/monitoring_dashboard.tf), ensuring every series displays meaningful `Deployment/<name>`, `StatefulSet/<name>`, pod, container, slice/DNN, and node names rather than empty strings or series UUIDs.

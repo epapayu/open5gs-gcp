@@ -56,7 +56,8 @@ flowchart LR
 ├── .gitignore                                # Excludes Terraform state, GCP credentials, and SIM keys
 ├── terraform/
 │   ├── main.tf                               # Multi-VPC (SBI, N2, N3, N4, N6), GKE Dataplane V2, Firestore, Memorystore
-│   ├── outputs.tf                            # Outputs GKE cluster, Firestore MongoDB SCRAM URI, and Memorystore endpoints
+│   ├── monitoring_dashboard.tf               # Google Cloud Monitoring "Open5GS" Dashboard (:9090 Prometheus + GKE Deployments)
+│   ├── outputs.tf                            # Outputs GKE cluster, Firestore URI, Memorystore, and Dashboard URL
 │   └── variables.tf                          # Parameterized GCP project, region, PLMN (MCC/MNC), and CIDRs
 └── k8s/
     ├── 00-namespace-and-networks.yaml        # Namespace & GKE Multi-Network CRDs (N2, N3, N4, N6)
@@ -131,6 +132,16 @@ kubectl -n open5gs logs deploy/ueransim-ue
 # Send live User Plane traffic from the simulated UE through UPF (ogstun) -> N6 Internet
 kubectl -n open5gs exec -it deploy/ueransim-ue -- ping -I uesimtun0 -c 5 8.8.8.8
 kubectl -n open5gs exec -it deploy/ueransim-ue -- curl --interface uesimtun0 -I https://www.google.com
+```
+
+### 5. View the `"Open5GS"` Google Cloud Monitoring Dashboard
+Terraform automatically provisions a unified **Google Cloud Monitoring** dashboard named **`"Open5GS"`** ([`terraform/monitoring_dashboard.tf`](terraform/monitoring_dashboard.tf)) combining:
+- **Open5GS `:9090/metrics` Telemetry (Managed Service for Prometheus)**: Real-time scorecards and time-series charts across `AMF`, `SMF`, `UPF`, `PCF`, and `MME` (`gnb`, `amf_session`, 5G-AKA registration/auth rates, PDU sessions & QoS flows by `S-NSSAI`/`5QI`, `N3` GTP-U packet rates & `DNN` flows, `N4` PFCP procedures, and NF process memory/open FDs).
+- **GKE Deployments, StatefulSets & Cluster Health**: Ready replicas across all Deployments and StatefulSets (`DEPLOYMENT` & `STATEFULSET` KSM packages), running containers, per-workload CPU/memory, pod `RX`/`TX` network throughput, container restart rate, `kube-apiserver` P99 latency, and node pool utilization—all labeled by `Deployment/<name>`, `StatefulSet/<name>`, pod, container, and node name.
+
+```bash
+# Print the direct Google Cloud Console URL for the "Open5GS" dashboard
+terraform -chdir=terraform output -raw monitoring_dashboard_console_url
 ```
 
 ---

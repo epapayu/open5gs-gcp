@@ -270,7 +270,6 @@ spec:
       labels:
         app.kubernetes.io/part-of: open5gs-5gc
         nf: pcrf
-        metrics: enabled
     spec:
       nodeSelector:
         5g-plane: control-plane-sba

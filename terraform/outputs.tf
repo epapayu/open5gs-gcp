@@ -33,3 +33,13 @@ output "redis_port" {
   description = "Cloud Memorystore Redis port"
   value       = google_redis_instance.open5gs_inmemory_cache.port
 }
+
+output "monitoring_dashboard_id" {
+  description = "Google Cloud Monitoring 'Open5GS' dashboard resource ID"
+  value       = google_monitoring_dashboard.open5gs_dashboard.id
+}
+
+output "monitoring_dashboard_console_url" {
+  description = "Direct Google Cloud Console URL for the Open5GS Monitoring Dashboard"
+  value       = "https://console.cloud.google.com/monitoring/dashboards/custom/${basename(google_monitoring_dashboard.open5gs_dashboard.id)}?project=${var.project_id}"
+}

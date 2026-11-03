@@ -10,8 +10,156 @@
 #   - open5gs-sgwud  : Serving Gateway User Plane (S1-U / S5u GTP-U :2152, Sxa PFCP :8805)
 #   - open5gs-dbctl  : Automated CLI Subscriber & Slice Provisioning Job
 # ==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-epc-configs
+  namespace: open5gs
+data:
+  hss.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    hss:
+      freeDiameter: /etc/open5gs-epc/hss.conf
 
-# 1. HSS (Home Subscriber Server - S6a/Cx Diameter over TCP/SCTP :3868 & TLS :5868)
+  hss.conf: |
+    Identity = "hss.gradiant";
+    Realm = "gradiant";
+    No_SCTP;
+    TLS_Cred = "/opt/open5gs/etc/freeDiameter/hss.cert.pem", "/opt/open5gs/etc/freeDiameter/hss.key.pem";
+    TLS_CA = "/opt/open5gs/etc/freeDiameter/cacert.pem";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dbg_msg_dumps.fdx" : "0x8888";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_rfc5777.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_mip6i.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nasreq.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nas_mipv6.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca_3gpp.fdx";
+    ConnectPeer = "mme.gradiant" { ConnectTo = "open5gs-mme-0.open5gs-mme.open5gs.svc.cluster.local"; Port = 3868; TcTimer = 60; TwTimer = 30; No_TLS; };
+
+  pcrf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    pcrf:
+      freeDiameter: /etc/open5gs-epc/pcrf.conf
+      metrics:
+        server:
+          - dev: eth0
+            port: 9090
+
+  pcrf.conf: |
+    Identity = "pcrf.gradiant";
+    Realm = "gradiant";
+    No_SCTP;
+    TLS_Cred = "/opt/open5gs/etc/freeDiameter/pcrf.cert.pem", "/opt/open5gs/etc/freeDiameter/pcrf.key.pem";
+    TLS_CA = "/opt/open5gs/etc/freeDiameter/cacert.pem";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dbg_msg_dumps.fdx" : "0x8888";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_rfc5777.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_mip6i.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nasreq.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nas_mipv6.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca_3gpp.fdx";
+    ConnectPeer = "smf.gradiant" { ConnectTo = "open5gs-smf-0.open5gs-smf.open5gs.svc.cluster.local"; Port = 3868; TcTimer = 60; TwTimer = 30; No_TLS; };
+
+  mme.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    mme:
+      freeDiameter: /etc/open5gs-epc/mme.conf
+      s1ap:
+        server:
+          - dev: net1
+      gtpc:
+        server:
+          - dev: eth0
+        client:
+          sgwc:
+            - address: open5gs-sgwc-0.open5gs-sgwc.open5gs.svc.cluster.local
+              tac: 1
+          smf:
+            - address: open5gs-smf-0.open5gs-smf.open5gs.svc.cluster.local
+              tac: 1
+      metrics:
+        server:
+          - dev: eth0
+            port: 9090
+      gummei:
+        - plmn_id:
+            mcc: 999
+            mnc: 70
+          mme_gid: 2
+          mme_code: 1
+      tai:
+        - plmn_id:
+            mcc: 999
+            mnc: 70
+          tac: 1
+      security:
+        integrity_order: [EIA2, EIA1, EIA0]
+        ciphering_order: [EEA0, EEA1, EEA2]
+      network_name:
+        full: Open5GS-GCP
+        short: O5GS
+      mme_name: open5gs-mme0
+
+  mme.conf: |
+    Identity = "mme.gradiant";
+    Realm = "gradiant";
+    No_SCTP;
+    TLS_Cred = "/opt/open5gs/etc/freeDiameter/mme.cert.pem", "/opt/open5gs/etc/freeDiameter/mme.key.pem";
+    TLS_CA = "/opt/open5gs/etc/freeDiameter/cacert.pem";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dbg_msg_dumps.fdx" : "0x8888";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_rfc5777.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_mip6i.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nasreq.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nas_mipv6.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca_3gpp.fdx";
+    ConnectPeer = "hss.gradiant" { ConnectTo = "open5gs-hss.open5gs.svc.cluster.local"; Port = 3868; TcTimer = 60; TwTimer = 30; No_TLS; };
+
+  sgwc.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    sgwc:
+      gtpc:
+        server:
+          - dev: eth0
+      pfcp:
+        server:
+          - dev: net1
+        client:
+          sgwu:
+            - address: __SGWU_SXA_ADDRESS__
+              tac: 1
+
+  sgwu.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    sgwu:
+      pfcp:
+        server:
+          - dev: net2
+      gtpu:
+        server:
+          - dev: net1
+---
+# 1. HSS (Home Subscriber Server - S6a/Cx Diameter over TCP :3868 & TLS :5868)
 apiVersion: v1
 kind: Service
 metadata:
@@ -25,10 +173,6 @@ spec:
       port: 3868
       targetPort: 3868
       protocol: TCP
-    - name: diameter-sctp
-      port: 3868
-      targetPort: 3868
-      protocol: SCTP
     - name: diameter-tls
       port: 5868
       targetPort: 5868
@@ -43,7 +187,7 @@ metadata:
     app.kubernetes.io/part-of: open5gs-5gc
     nf: hss
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: hss
@@ -57,8 +201,17 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: hssd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-hssd", "-c", "/etc/open5gs/hss.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ulimit -n 65536
+              export DB_URI="$(printf '%s' "${DB_URI}" | sed -E 's#@[^/]+/#@open5gs-firestore-proxy.open5gs.svc.cluster.local:27017/#; s#\?.*#?authSource=admin\&authMechanism=SCRAM-SHA-256\&retryWrites=false#')"
+              printf 'db_uri: "%s"\n' "${DB_URI}" > /tmp/hss.yaml
+              cat /etc/open5gs-epc/hss.yaml >> /tmp/hss.yaml
+              exec open5gs-hssd -c /tmp/hss.yaml
           env:
             - name: DB_URI
               valueFrom:
@@ -69,15 +222,18 @@ spec:
             - containerPort: 3868
               name: diameter-tcp
               protocol: TCP
-            - containerPort: 3868
-              name: diameter-sctp
-              protocol: SCTP
             - containerPort: 5868
               name: diameter-tls
               protocol: TCP
+          volumeMounts:
+            - name: epc-configs
+              mountPath: /etc/open5gs-epc
+      volumes:
+        - name: epc-configs
+          configMap:
+            name: open5gs-epc-configs
 ---
 # 2. PCRF (Policy and Charging Rules Function - Gx/Rx Diameter :3868/:5868)
-# Pairs with open5gs-smfd (Combo PGW-C) over Gx and IMS P-CSCF over Rx
 apiVersion: v1
 kind: Service
 metadata:
@@ -91,10 +247,6 @@ spec:
       port: 3868
       targetPort: 3868
       protocol: TCP
-    - name: diameter-sctp
-      port: 3868
-      targetPort: 3868
-      protocol: SCTP
     - name: diameter-tls
       port: 5868
       targetPort: 5868
@@ -109,7 +261,7 @@ metadata:
     app.kubernetes.io/part-of: open5gs-5gc
     nf: pcrf
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: pcrf
@@ -124,8 +276,17 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: pcrfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-pcrfd", "-c", "/etc/open5gs/pcrf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ulimit -n 65536
+              export DB_URI="$(printf '%s' "${DB_URI}" | sed -E 's#@[^/]+/#@open5gs-firestore-proxy.open5gs.svc.cluster.local:27017/#; s#\?.*#?authSource=admin\&authMechanism=SCRAM-SHA-256\&retryWrites=false#')"
+              printf 'db_uri: "%s"\n' "${DB_URI}" > /tmp/pcrf.yaml
+              cat /etc/open5gs-epc/pcrf.yaml >> /tmp/pcrf.yaml
+              exec open5gs-pcrfd -c /tmp/pcrf.yaml
           env:
             - name: DB_URI
               valueFrom:
@@ -142,15 +303,22 @@ spec:
             - containerPort: 9090
               name: metrics
               protocol: TCP
+          volumeMounts:
+            - name: epc-configs
+              mountPath: /etc/open5gs-epc
+      volumes:
+        - name: epc-configs
+          configMap:
+            name: open5gs-epc-configs
 ---
 # 3. MME (Mobility Management Entity - S1-MME SCTP :36412, S11/N26 GTPv2-C :2123, SGs :29118)
-# Connects to open5gs-amfd over N26 (GTPv2-C) for 5GS <-> EPS interworking & handover
 apiVersion: v1
 kind: Service
 metadata:
   name: open5gs-mme
   namespace: open5gs
 spec:
+  clusterIP: None
   selector:
     nf: mme
   ports:
@@ -158,6 +326,10 @@ spec:
       port: 2123
       targetPort: 2123
       protocol: UDP
+    - name: s6a-diameter
+      port: 3868
+      targetPort: 3868
+      protocol: TCP
     - name: sgsap
       port: 29118
       targetPort: 29118
@@ -173,7 +345,7 @@ metadata:
     nf: mme
 spec:
   serviceName: open5gs-mme
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: mme
@@ -184,6 +356,7 @@ spec:
         nf: mme
         metrics: enabled
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -194,8 +367,8 @@ spec:
         5g-plane: multinic-dataplane
       containers:
         - name: mmed
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-mmed", "-c", "/etc/open5gs/mme.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-mmed -c /etc/open5gs-epc/mme.yaml"]
           ports:
             - containerPort: 36412
               name: s1ap-sctp
@@ -212,6 +385,13 @@ spec:
             - containerPort: 9090
               name: metrics
               protocol: TCP
+          volumeMounts:
+            - name: epc-configs
+              mountPath: /etc/open5gs-epc
+      volumes:
+        - name: epc-configs
+          configMap:
+            name: open5gs-epc-configs
 ---
 # 4. SGW-C (Serving Gateway Control Plane - S11/S5c GTPv2-C :2123 & Sxa PFCP :8805)
 apiVersion: v1
@@ -220,6 +400,7 @@ metadata:
   name: open5gs-sgwc
   namespace: open5gs
 spec:
+  clusterIP: None
   selector:
     nf: sgwc
   ports:
@@ -238,7 +419,7 @@ metadata:
     nf: sgwc
 spec:
   serviceName: open5gs-sgwc
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: sgwc
@@ -248,6 +429,7 @@ spec:
         app.kubernetes.io/part-of: open5gs-5gc
         nf: sgwc
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -258,8 +440,18 @@ spec:
         5g-plane: multinic-dataplane
       containers:
         - name: sgwcd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-sgwcd", "-c", "/etc/open5gs/sgwc.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ulimit -n 65536
+              sed "s/__SGWU_SXA_ADDRESS__/${SGWU_SXA_ADDRESS}/g" /etc/open5gs-epc/sgwc.yaml > /tmp/sgwc.yaml
+              exec open5gs-sgwcd -c /tmp/sgwc.yaml
+          envFrom:
+            - configMapRef:
+                name: open5gs-dataplane-endpoints
           ports:
             - containerPort: 2123
               name: s11-s5c-gtpc
@@ -267,6 +459,13 @@ spec:
             - containerPort: 8805
               name: sxa-pfcp
               protocol: UDP
+          volumeMounts:
+            - name: epc-configs
+              mountPath: /etc/open5gs-epc
+      volumes:
+        - name: epc-configs
+          configMap:
+            name: open5gs-epc-configs
 ---
 # 5. SGW-U (Serving Gateway User Plane - S1-U/S5u GTP-U :2152 & Sxa PFCP :8805)
 apiVersion: v1
@@ -298,7 +497,7 @@ metadata:
     nf: sgwu
 spec:
   serviceName: open5gs-sgwu
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: sgwu
@@ -308,6 +507,7 @@ spec:
         app.kubernetes.io/part-of: open5gs-5gc
         nf: sgwu
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -319,8 +519,8 @@ spec:
         5g-plane: multinic-dataplane
       containers:
         - name: sgwud
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-sgwud", "-c", "/etc/open5gs/sgwu.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-sgwud -c /etc/open5gs-epc/sgwu.yaml"]
           ports:
             - containerPort: 2152
               name: s1u-s5u-gtpu
@@ -328,9 +528,15 @@ spec:
             - containerPort: 8805
               name: sxa-pfcp
               protocol: UDP
+          volumeMounts:
+            - name: epc-configs
+              mountPath: /etc/open5gs-epc
+      volumes:
+        - name: epc-configs
+          configMap:
+            name: open5gs-epc-configs
 ---
 # 6. open5gs-dbctl Automated Subscriber & Slice CLI Provisioning Job
-# Implements misc/db/open5gs-dbctl to seed initial subscribers & slices into Firestore/MongoDB
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -339,7 +545,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: open5gs-5gc
 spec:
-  backoffLimit: 2
+  backoffLimit: 3
   template:
     spec:
       restartPolicy: OnFailure
@@ -347,21 +553,22 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: open5gs-dbctl
-          image: ghcr.io/open5gs/open5gs:v2.7.2
+          image: docker.io/gradiant/open5gs-dbctl:0.10.3
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
             - |
               set -e
               echo "Provisioning initial 5G SA / 4G EPC test subscriber via open5gs-dbctl..."
-              open5gs-dbctl --db_uri="${DB_URI}" add_ue_with_slice \
+              /usr/local/bin/open5gs-dbctl --db_uri="${DB_URI}" remove 999700000000001 || true
+              /usr/local/bin/open5gs-dbctl --db_uri="${DB_URI}" add_ue_with_slice \
                 999700000000001 \
                 465B5CE8B199B49FAA5F0A2EE238A6BC \
                 E8ED289DEBA952E4283B54E88E6183CA \
                 internet \
                 1 \
                 010203
-              open5gs-dbctl --db_uri="${DB_URI}" showpretty
+              /usr/local/bin/open5gs-dbctl --db_uri="${DB_URI}" showpretty
           env:
             - name: DB_URI
               valueFrom:

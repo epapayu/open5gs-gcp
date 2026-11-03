@@ -55,6 +55,7 @@ flowchart LR
 ├── .gitignore                                # Excludes Terraform state, GCP credentials, and SIM keys
 ├── terraform/
 │   ├── main.tf                               # Multi-VPC (SBI, N2, N3, N4, N6), GKE Dataplane V2, Firestore, Memorystore
+│   ├── outputs.tf                            # Outputs GKE cluster, Firestore MongoDB SCRAM URI, and Memorystore endpoints
 │   └── variables.tf                          # Parameterized GCP project, region, PLMN (MCC/MNC), and CIDRs
 └── k8s/
     ├── 00-namespace-and-networks.yaml        # Namespace & GKE Multi-Network CRDs (N2, N3, N4, N6)
@@ -84,12 +85,12 @@ gcloud container clusters get-credentials open5gs-5gc-cluster --region=us-centra
 # Create namespace and multi-NIC network attachments
 kubectl apply -f ../k8s/00-namespace-and-networks.yaml
 
-# Store Firestore (MongoDB-compatible) URI and Memorystore URI in Kubernetes Secrets
+# Store Firestore (MongoDB-compatible SCRAM-SHA-256) URI and Memorystore URI in Kubernetes Secrets
 kubectl -n open5gs create secret generic open5gs-db-secret \
-  --from-literal=db_uri="mongodb://<USER>:<PASS>@<FIRESTORE_MONGO_ENDPOINT>:27017/open5gs?tls=true"
+  --from-literal=db_uri="$(terraform output -raw firestore_mongodb_uri)"
 
 kubectl -n open5gs create secret generic open5gs-redis-secret \
-  --from-literal=redis_uri="redis://<MEMORYSTORE_ENDPOINT>:6379"
+  --from-literal=redis_uri="rediss://$(terraform output -raw redis_host):$(terraform output -raw redis_port)"
 ```
 
 ### 3. Deploy 5G SA Control Plane, EPC/N26 Interworking, User Plane (UPF), & NMS
@@ -105,6 +106,14 @@ kubectl apply -f ../k8s/03-nms-webui-iap.yaml
 
 # Deploy 4G EPC CUPS (MME, HSS, PCRF, SGW-C, SGW-U), N26 Interworking, & open5gs-dbctl Subscriber Seed Job
 kubectl apply -f ../k8s/05-epc-cups-and-interworking.yaml
+
+# Populate live GKE Multi-NIC secondary interface IPs (N2, N4, Sxa) and restart SMF/SGW-C
+kubectl -n open5gs create configmap open5gs-dataplane-endpoints --dry-run=client -o yaml \
+  --from-literal=AMF_N2_ADDRESS="$(kubectl -n open5gs exec open5gs-amf-0 -- ip -4 -o addr show dev net1 | awk '{split($4,a,"/"); print a[1]}')" \
+  --from-literal=UPF_N4_ADDRESS="$(kubectl -n open5gs exec open5gs-upf-0 -c upfd -- ip -4 -o addr show dev net2 | awk '{split($4,a,"/"); print a[1]}')" \
+  --from-literal=SGWU_SXA_ADDRESS="$(kubectl -n open5gs exec open5gs-sgwu-0 -- ip -4 -o addr show dev net2 | awk '{split($4,a,"/"); print a[1]}')" \
+  | kubectl apply -f -
+kubectl -n open5gs rollout restart statefulset/open5gs-smf statefulset/open5gs-sgwc
 ```
 
 ### 4. Simulate the Complete 5GS (UE + gNodeB + Data Path)

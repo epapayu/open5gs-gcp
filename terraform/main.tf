@@ -56,6 +56,21 @@ resource "google_compute_subnetwork" "subnet_sbi" {
   }
 }
 
+# Cloud Router & Cloud NAT on SBI/Management VPC for GKE Node Container Image Pulls
+resource "google_compute_router" "sbi_router" {
+  name    = "open5gs-sbi-router"
+  region  = var.region
+  network = google_compute_network.vpc_sbi.id
+}
+
+resource "google_compute_router_nat" "sbi_nat" {
+  name                               = "open5gs-sbi-nat"
+  router                             = google_compute_router.sbi_router.name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
+
 # 1B. N2 VPC: gNodeB -> AMF NGAP over SCTP (:38412)
 resource "google_compute_network" "vpc_n2" {
   name                    = "vpc-n2-signaling"
@@ -68,6 +83,11 @@ resource "google_compute_subnetwork" "subnet_n2" {
   ip_cidr_range = "10.20.0.0/24"
   region        = var.region
   network       = google_compute_network.vpc_n2.id
+
+  secondary_ip_range {
+    range_name    = "pods-n2"
+    ip_cidr_range = "10.120.0.0/20"
+  }
 }
 
 # 1C. N3 VPC: gNodeB <-> UPF GTP-U User Plane (:2152) - Jumbo MTU 8896
@@ -82,6 +102,11 @@ resource "google_compute_subnetwork" "subnet_n3" {
   ip_cidr_range = "10.30.0.0/24"
   region        = var.region
   network       = google_compute_network.vpc_n3.id
+
+  secondary_ip_range {
+    range_name    = "pods-n3"
+    ip_cidr_range = "10.130.0.0/20"
+  }
 }
 
 # 1D. N4 VPC: SMF <-> UPF PFCP Session Control (:8805) - Jumbo MTU 8896
@@ -96,6 +121,11 @@ resource "google_compute_subnetwork" "subnet_n4" {
   ip_cidr_range = "10.40.0.0/24"
   region        = var.region
   network       = google_compute_network.vpc_n4.id
+
+  secondary_ip_range {
+    range_name    = "pods-n4"
+    ip_cidr_range = "10.140.0.0/20"
+  }
 }
 
 # 1E. N6 VPC: UPF -> External Data Network (DN / Internet Breakout)
@@ -110,6 +140,11 @@ resource "google_compute_subnetwork" "subnet_n6" {
   ip_cidr_range = "10.60.0.0/24"
   region        = var.region
   network       = google_compute_network.vpc_n6.id
+
+  secondary_ip_range {
+    range_name    = "pods-n6"
+    ip_cidr_range = "10.160.0.0/20"
+  }
 }
 
 # Cloud Router & Cloud NAT on N6 VPC for UE Internet Breakout
@@ -147,7 +182,11 @@ resource "google_compute_firewall" "allow_n2_s1mme_sctp" {
     ports = ["2123"]
   }
 
-  source_ranges = [var.ran_cidr, "10.20.0.0/24"]
+  allow {
+    protocol = "icmp"
+  }
+
+  source_ranges = [var.ran_cidr, "10.20.0.0/24", "10.120.0.0/20"]
 }
 
 resource "google_compute_firewall" "allow_n3_gtpu" {
@@ -159,7 +198,11 @@ resource "google_compute_firewall" "allow_n3_gtpu" {
     ports    = ["2152"]
   }
 
-  source_ranges = [var.ran_cidr, "10.30.0.0/24"]
+  allow {
+    protocol = "icmp"
+  }
+
+  source_ranges = [var.ran_cidr, "10.30.0.0/24", "10.130.0.0/20"]
 }
 
 resource "google_compute_firewall" "allow_n4_pfcp" {
@@ -171,7 +214,17 @@ resource "google_compute_firewall" "allow_n4_pfcp" {
     ports    = ["8805"]
   }
 
-  source_ranges = ["10.40.0.0/24"]
+  allow {
+    protocol = "icmp"
+  }
+
+  source_ranges = ["10.40.0.0/24", "10.140.0.0/20"]
+}
+
+# Cloud Armor WAF Security Policy for Open5GS NMS WebUI (BackendConfig)
+resource "google_compute_security_policy" "nms_cloud_armor" {
+  name        = "open5gs-nms-cloud-armor-policy"
+  description = "Cloud Armor WAF security policy protecting Open5GS WebUI NMS"
 }
 
 # ------------------------------------------------------------------------------
@@ -188,6 +241,21 @@ resource "google_container_cluster" "open5gs_cluster" {
 
   remove_default_node_pool = true
   initial_node_count       = 1
+  deletion_protection      = false
+
+  node_config {
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+  }
+
+  # Private GKE Nodes (uses Cloud NAT on vpc-sbi-mgmt; complies with vmExternalIpAccess org policies)
+  private_cluster_config {
+    enable_private_nodes    = true
+    enable_private_endpoint = false
+    master_ipv4_cidr_block  = "172.17.0.0/28"
+  }
 
   # Enable Dataplane V2 (Cilium eBPF) + Multi-Networking for N2/N3/N4/N6 NICs
   datapath_provider = "ADVANCED_DATAPATH"
@@ -214,6 +282,10 @@ resource "google_container_cluster" "open5gs_cluster" {
   logging_config {
     enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
   }
+
+  lifecycle {
+    ignore_changes = [node_config]
+  }
 }
 
 # 3A. Control Plane Node Pool (NRF, SCP, AUSF, UDM, UDR, PCF, NSSF, BSF, SEPP, WebUI)
@@ -238,6 +310,11 @@ resource "google_container_node_pool" "control_plane_pool" {
       enabled = true
     }
 
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+
     oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
@@ -252,20 +329,10 @@ resource "google_container_node_pool" "multinic_dataplane_pool" {
 
   node_locations = [var.zones[0], var.zones[1]]
 
-  node_config {
-    machine_type   = "c3-standard-8"
-    image_type     = "UBUNTU_CONTAINERD"
-    can_ip_forward = true
+  # Attach Secondary VPC NICs & Pod Alias Ranges for 3GPP N2, N3, N4, and N6 isolation
+  network_config {
+    enable_private_nodes = true
 
-    labels = {
-      "5g-plane" = "multinic-dataplane"
-    }
-
-    gvnic {
-      enabled = true
-    }
-
-    # Attach Secondary VPC NICs for 3GPP N2, N3, N4, and N6 isolation
     additional_node_network_configs {
       network    = google_compute_network.vpc_n2.name
       subnetwork = google_compute_subnetwork.subnet_n2.name
@@ -286,6 +353,48 @@ resource "google_container_node_pool" "multinic_dataplane_pool" {
       subnetwork = google_compute_subnetwork.subnet_n6.name
     }
 
+    additional_pod_network_configs {
+      subnetwork          = google_compute_subnetwork.subnet_n2.name
+      secondary_pod_range = tolist(google_compute_subnetwork.subnet_n2.secondary_ip_range)[0].range_name
+      max_pods_per_node   = 16
+    }
+
+    additional_pod_network_configs {
+      subnetwork          = google_compute_subnetwork.subnet_n3.name
+      secondary_pod_range = tolist(google_compute_subnetwork.subnet_n3.secondary_ip_range)[0].range_name
+      max_pods_per_node   = 16
+    }
+
+    additional_pod_network_configs {
+      subnetwork          = google_compute_subnetwork.subnet_n4.name
+      secondary_pod_range = tolist(google_compute_subnetwork.subnet_n4.secondary_ip_range)[0].range_name
+      max_pods_per_node   = 16
+    }
+
+    additional_pod_network_configs {
+      subnetwork          = google_compute_subnetwork.subnet_n6.name
+      secondary_pod_range = tolist(google_compute_subnetwork.subnet_n6.secondary_ip_range)[0].range_name
+      max_pods_per_node   = 16
+    }
+  }
+
+  node_config {
+    machine_type = "c3-standard-8"
+    image_type   = "UBUNTU_CONTAINERD"
+
+    labels = {
+      "5g-plane" = "multinic-dataplane"
+    }
+
+    gvnic {
+      enabled = true
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+
     oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
@@ -296,14 +405,30 @@ resource "google_container_node_pool" "multinic_dataplane_pool" {
 
 # 4A. Cloud Firestore Enterprise with MongoDB Compatibility (Subscriber & Policy DB)
 resource "google_firestore_database" "open5gs_mongodb_compat" {
-  provider                  = google-beta
-  project                   = var.project_id
-  name                      = "open5gs-db"
-  location_id               = var.region
-  type                      = "MONGODB_COMPATIBLE"
-  database_edition          = "ENTERPRISE"
-  deletion_policy           = "DELETE"
-  point_in_time_recovery_enablement = "POINT_IN_TIME_RECOVERY_ENABLED"
+  provider                            = google-beta
+  project                             = var.project_id
+  name                                = "open5gs-db"
+  location_id                         = var.region
+  type                                = "FIRESTORE_NATIVE"
+  database_edition                    = "ENTERPRISE"
+  firestore_data_access_mode          = "DATA_ACCESS_MODE_DISABLED"
+  mongodb_compatible_data_access_mode = "DATA_ACCESS_MODE_ENABLED"
+  deletion_policy                     = "DELETE"
+  point_in_time_recovery_enablement   = "POINT_IN_TIME_RECOVERY_ENABLED"
+}
+
+# 4A-2. SCRAM-SHA-256 Database Credentials & IAM Binding for Open5GS NFs / WebUI
+resource "google_firestore_user_creds" "open5gs_db_user" {
+  provider = google-beta
+  project  = var.project_id
+  database = google_firestore_database.open5gs_mongodb_compat.name
+  name     = "open5gs-user"
+}
+
+resource "google_project_iam_member" "open5gs_db_user_owner" {
+  project = var.project_id
+  role    = "roles/datastore.owner"
+  member  = google_firestore_user_creds.open5gs_db_user.resource_identity[0].principal
 }
 
 # 4B. Cloud Memorystore for Redis/Valkey (NMS Session Cache, Policy Cache, UDSF Store)

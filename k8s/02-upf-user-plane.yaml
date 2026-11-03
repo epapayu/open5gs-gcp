@@ -5,9 +5,38 @@
 #   - eth0 : Management & Prometheus Telemetry (:9090)
 #   - net1 : N3 GTP-U User Plane (:2152/UDP, MTU 8896)
 #   - net2 : N4 PFCP Control Plane (:8805/UDP, MTU 8896)
-#   - net3 : N6 External Data Network Breakout (via Cloud NAT)
+#   - net3 : N6 External Data Network Breakout (via Cloud NAT on vpc-n6-dn)
 #   - ogstun : Kernel TUN interface for UE Pool (10.45.0.0/16)
 # ==============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-upf-config
+  namespace: open5gs
+data:
+  upf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    upf:
+      pfcp:
+        server:
+          - dev: net2
+      gtpu:
+        server:
+          - dev: net1
+      session:
+        - subnet: 10.45.0.0/16
+          gateway: 10.45.0.1
+          dnn: internet
+          dev: ogstun
+      metrics:
+        server:
+          - dev: eth0
+            port: 9090
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -37,7 +66,7 @@ metadata:
     nf: upf
 spec:
   serviceName: open5gs-upf
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: upf
@@ -48,6 +77,7 @@ spec:
         nf: upf
         metrics: enabled
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -60,29 +90,48 @@ spec:
         5g-plane: multinic-dataplane
       initContainers:
         - name: setup-ogstun-and-nat
-          image: ghcr.io/open5gs/open5gs:v2.7.2
+          image: docker.io/gradiant/open5gs:2.7.2
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
             - |
               set -ex
               ip tuntap add name ogstun mode tun || true
-              ip addr add 10.45.0.1/16 dev ogstun || true
+              ip addr replace 10.45.0.1/16 dev ogstun
               ip link set ogstun mtu 1400
               ip link set ogstun up
               sysctl -w net.ipv4.ip_forward=1
-              iptables -t nat -A POSTROUTING -s 10.45.0.0/16 -o net3 -j MASQUERADE
+              for iface in all default eth0 net1 net2 net3 ogstun; do
+                sysctl -w "net.ipv4.conf.${iface}.rp_filter=0" || true
+              done
+              # Policy-route UE subnet (10.45.0.0/16) out dedicated N6 VPC (net3 -> open5gs-n6-nat)
+              NET3_GW=$(ip route show table all dev net3 | awk '/default via/ {print $3; exit}')
+              if [ -z "${NET3_GW}" ]; then
+                NET3_GW="10.60.0.1"
+              fi
+              ip route replace "${NET3_GW}" dev net3 table 200 || true
+              ip route replace default via "${NET3_GW}" dev net3 table 200 || true
+              ip rule del from 10.45.0.0/16 lookup 200 2>/dev/null || true
+              ip rule add from 10.45.0.0/16 lookup 200
+              iptables -t nat -C POSTROUTING -s 10.45.0.0/16 -o net3 -j MASQUERADE 2>/dev/null || \
+                iptables -t nat -A POSTROUTING -s 10.45.0.0/16 -o net3 -j MASQUERADE
           securityContext:
+            runAsUser: 0
             privileged: true
             capabilities:
               add:
                 - NET_ADMIN
                 - SYS_ADMIN
+          volumeMounts:
+            - name: dev-net-tun
+              mountPath: /dev/net/tun
       containers:
         - name: upfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-upfd", "-c", "/etc/open5gs/upf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-upfd -c /etc/open5gs-cfg/upf.yaml"]
           securityContext:
+            runAsUser: 0
+            privileged: true
             capabilities:
               add:
                 - NET_ADMIN
@@ -98,15 +147,20 @@ spec:
               protocol: TCP
           resources:
             requests:
-              cpu: "4000m"
-              memory: "4Gi"
+              cpu: "2000m"
+              memory: "2Gi"
             limits:
               cpu: "6000m"
               memory: "8Gi"
           volumeMounts:
+            - name: upf-config
+              mountPath: /etc/open5gs-cfg
             - name: dev-net-tun
               mountPath: /dev/net/tun
       volumes:
+        - name: upf-config
+          configMap:
+            name: open5gs-upf-config
         - name: dev-net-tun
           hostPath:
             path: /dev/net/tun
@@ -119,7 +173,7 @@ metadata:
   name: open5gs-upf-pdb
   namespace: open5gs
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       nf: upf

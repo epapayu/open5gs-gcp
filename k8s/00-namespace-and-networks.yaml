@@ -17,7 +17,9 @@ metadata:
 spec:
   vpc: vpc-n2-signaling
   vpcSubnet: subnet-n2
-  deviceMode: NetDevice
+  podIPv4Ranges:
+    rangeNames:
+      - pods-n2
 ---
 apiVersion: networking.gke.io/v1
 kind: Network
@@ -38,7 +40,9 @@ metadata:
 spec:
   vpc: vpc-n3-userplane
   vpcSubnet: subnet-n3
-  deviceMode: NetDevice
+  podIPv4Ranges:
+    rangeNames:
+      - pods-n3
 ---
 apiVersion: networking.gke.io/v1
 kind: Network
@@ -59,7 +63,9 @@ metadata:
 spec:
   vpc: vpc-n4-pfcp
   vpcSubnet: subnet-n4
-  deviceMode: NetDevice
+  podIPv4Ranges:
+    rangeNames:
+      - pods-n4
 ---
 apiVersion: networking.gke.io/v1
 kind: Network
@@ -80,7 +86,9 @@ metadata:
 spec:
   vpc: vpc-n6-dn
   vpcSubnet: subnet-n6
-  deviceMode: NetDevice
+  podIPv4Ranges:
+    rangeNames:
+      - pods-n6
 ---
 apiVersion: networking.gke.io/v1
 kind: Network

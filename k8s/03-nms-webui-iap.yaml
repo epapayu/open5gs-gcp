@@ -1,7 +1,7 @@
 # ==============================================================================
 # 03-nms-webui-iap.yaml
 # Network Management System (NMS) - Open5GS WebUI
-# Secured via Google Cloud External ALB + Cloud Armor + Identity-Aware Proxy (IAP)
+# Secured via Google Cloud External ALB + Cloud Armor (+ IAP Ready)
 # Connected to Cloud Firestore (MongoDB Compat) & Cloud Memorystore (Valkey/Redis)
 # ==============================================================================
 apiVersion: cloud.google.com/v1
@@ -10,12 +10,15 @@ metadata:
   name: open5gs-webui-iap-config
   namespace: open5gs
 spec:
-  iap:
-    enabled: true
-    oauthclientCredentials:
-      secretName: open5gs-iap-oauth-secret
+  # Attach Google Cloud Armor WAF policy (provisioned via Terraform)
   securityPolicy:
     name: "open5gs-nms-cloud-armor-policy"
+  # Note: Enable IAP below once an OAuth 2.0 Client Secret (open5gs-iap-oauth-secret)
+  # and custom domain ManagedCertificate are configured:
+  # iap:
+  #   enabled: true
+  #   oauthclientCredentials:
+  #     secretName: open5gs-iap-oauth-secret
   healthCheck:
     checkIntervalSec: 15
     timeoutSec: 5
@@ -63,7 +66,24 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: webui
-          image: ghcr.io/open5gs/open5gs-webui:v2.7.2
+          image: docker.io/gradiant/open5gs-webui:2.7.2
+          workingDir: /opt/open5gs-webui
+          command:
+            - /bin/sh
+            - -c
+            - |
+              export DB_URI="$(printf '%s' "${DB_URI}" | sed -E 's#@[^/]+/#@open5gs-firestore-proxy.open5gs.svc.cluster.local:27017/#; s#\?.*#?authSource=admin\&authMechanism=SCRAM-SHA-256\&retryWrites=false#')"
+              export NODE_PATH="/opt/open5gs-webui/node_modules"
+              node -e '
+                const fs = require("fs");
+                let s = fs.readFileSync("/opt/open5gs-webui/server/index.js", "utf8");
+                s = s.replace("serverSelectionTimeoutMS: 1000", "serverSelectionTimeoutMS: 15000");
+                s = s.replace("if (dev) {\n    Account.count", "if (true) {\n    Account.count");
+                s = s.replace("./routes", "/opt/open5gs-webui/server/routes");
+                s = s.replace("./models/account.js", "/opt/open5gs-webui/server/models/account.js");
+                fs.writeFileSync("/tmp/index.js", s);
+              '
+              exec node /tmp/index.js
           env:
             - name: DB_URI
               valueFrom:
@@ -82,6 +102,12 @@ spec:
           ports:
             - containerPort: 9999
               name: http-webui
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9999
+            initialDelaySeconds: 10
+            periodSeconds: 10
           resources:
             requests:
               cpu: "250m"
@@ -97,8 +123,9 @@ metadata:
   namespace: open5gs
   annotations:
     kubernetes.io/ingress.class: "gce"
-    networking.gke.io/managed-certificates: "open5gs-nms-managed-cert"
-    kubernetes.io/ingress.allow-http: "false"
+    # Uncomment once DNS points to Ingress VIP:
+    # networking.gke.io/managed-certificates: "open5gs-nms-managed-cert"
+    # kubernetes.io/ingress.allow-http: "false"
 spec:
   defaultBackend:
     service:

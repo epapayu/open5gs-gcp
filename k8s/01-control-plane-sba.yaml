@@ -2,7 +2,7 @@
 # 01-control-plane-sba.yaml
 # Open5GS 5G Standalone (5G SA) Service-Based Architecture (SBA) Control Plane
 # Includes: NRF, SCP, UDR, UDM, AUSF, PCF, NSSF, BSF, SEPP, AMF (Multi-NIC),
-#           SMF (Multi-NIC), and Google Cloud Managed Prometheus PodMonitoring
+#           SMF (Multi-NIC), ConfigMaps, and Google Cloud Managed Prometheus PodMonitoring
 # ==============================================================================
 apiVersion: v1
 kind: ConfigMap
@@ -15,6 +15,314 @@ data:
   TAC: "1"
   NRF_SBI_URI: "http://open5gs-nrf.open5gs.svc.cluster.local:7777"
   SCP_SBI_URI: "http://open5gs-scp.open5gs.svc.cluster.local:7777"
+---
+# Dynamic Multi-NIC Dataplane Peer Endpoints (Updated with live GKE Multi-NIC Pod IPs)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-dataplane-endpoints
+  namespace: open5gs
+data:
+  AMF_N2_ADDRESS: "10.120.0.2"
+  UPF_N4_ADDRESS: "10.140.0.35"
+  SGWU_SXA_ADDRESS: "10.140.0.4"
+---
+# Complete Open5GS v2.7.2 SBA Control Plane YAML & freeDiameter Configurations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-sba-configs
+  namespace: open5gs
+data:
+  nrf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    nrf:
+      serving:
+        - plmn_id:
+            mcc: 999
+            mnc: 70
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+
+  scp.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    scp:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          nrf:
+            - uri: http://open5gs-nrf.open5gs.svc.cluster.local:7777
+
+  udr.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    udr:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+
+  udm.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    udm:
+      hnet:
+        - id: 1
+          scheme: 1
+          key: /opt/open5gs/etc/open5gs/hnet/curve25519-1.key
+        - id: 2
+          scheme: 2
+          key: /opt/open5gs/etc/open5gs/hnet/secp256r1-2.key
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+
+  ausf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    ausf:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+
+  pcf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    pcf:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+      metrics:
+        server:
+          - dev: eth0
+            port: 9090
+
+  nssf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    nssf:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+          nsi:
+            - uri: http://open5gs-nrf.open5gs.svc.cluster.local:7777
+              s_nssai:
+                sst: 1
+                sd: 010203
+            - uri: http://open5gs-nrf.open5gs.svc.cluster.local:7777
+              s_nssai:
+                sst: 1
+
+  bsf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    bsf:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+
+  sepp1.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    sepp:
+      default:
+        tls:
+          server:
+            private_key: /opt/open5gs/etc/open5gs/tls/sepp1.key
+            cert: /opt/open5gs/etc/open5gs/tls/sepp1.crt
+          client:
+            cacert: /opt/open5gs/etc/open5gs/tls/ca.crt
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+      n32:
+        server:
+          - sender: sepp1.localdomain
+            scheme: https
+            dev: eth0
+            port: 7778
+
+  amf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    amf:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+      ngap:
+        server:
+          - dev: net1
+      gtpc:
+        server:
+          - dev: eth0
+      metrics:
+        server:
+          - dev: eth0
+            port: 9090
+      guami:
+        - plmn_id:
+            mcc: 999
+            mnc: 70
+          amf_id:
+            region: 2
+            set: 1
+      tai:
+        - plmn_id:
+            mcc: 999
+            mnc: 70
+          tac: 1
+      plmn_support:
+        - plmn_id:
+            mcc: 999
+            mnc: 70
+          s_nssai:
+            - sst: 1
+              sd: 010203
+            - sst: 1
+      security:
+        integrity_order: [NIA2, NIA1, NIA0]
+        ciphering_order: [NEA0, NEA1, NEA2]
+      network_name:
+        full: Open5GS-GCP
+        short: O5GS
+      amf_name: open5gs-amf0
+      time:
+        t3512:
+          value: 540
+
+  smf.yaml: |
+    logger:
+      level: info
+    global:
+      max:
+        ue: 1024
+    smf:
+      sbi:
+        server:
+          - dev: eth0
+            port: 7777
+        client:
+          scp:
+            - uri: http://open5gs-scp.open5gs.svc.cluster.local:7777
+      pfcp:
+        server:
+          - dev: net1
+        client:
+          upf:
+            - address: __UPF_N4_ADDRESS__
+              dnn: internet
+      gtpc:
+        server:
+          - dev: eth0
+      gtpu:
+        server:
+          - dev: eth0
+      metrics:
+        server:
+          - dev: eth0
+            port: 9090
+      session:
+        - subnet: 10.45.0.0/16
+          gateway: 10.45.0.1
+          dnn: internet
+      dns:
+        - 8.8.8.8
+        - 8.8.4.4
+      mtu: 1400
+      ctf:
+        enabled: auto
+      freeDiameter: /etc/open5gs-cfg/smf.conf
+      info:
+        - s_nssai:
+            - sst: 1
+              sd: 010203
+              dnn:
+                - internet
+            - sst: 1
+              dnn:
+                - internet
+
+  smf.conf: |
+    Identity = "smf.gradiant";
+    Realm = "gradiant";
+    No_SCTP;
+    TLS_Cred = "/opt/open5gs/etc/freeDiameter/smf.cert.pem", "/opt/open5gs/etc/freeDiameter/smf.key.pem";
+    TLS_CA = "/opt/open5gs/etc/freeDiameter/cacert.pem";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dbg_msg_dumps.fdx" : "0x8888";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_rfc5777.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_mip6i.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nasreq.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_nas_mipv6.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca.fdx";
+    LoadExtension = "/opt/open5gs/lib/freeDiameter/dict_dcca_3gpp.fdx";
+    ConnectPeer = "pcrf.gradiant" { ConnectTo = "open5gs-pcrf.open5gs.svc.cluster.local"; Port = 3868; TcTimer = 60; TwTimer = 30; No_TLS; };
 ---
 # 1. NRF (NF Repository Function)
 apiVersion: v1
@@ -40,7 +348,8 @@ metadata:
     app.kubernetes.io/part-of: open5gs-5gc
     nf: nrf
 spec:
-  replicas: 2
+  # Single authoritative in-memory NF Registry instance for PLMN 999-70
+  replicas: 1
   selector:
     matchLabels:
       nf: nrf
@@ -54,11 +363,14 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: nrfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-nrfd", "-c", "/etc/open5gs/nrf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-nrfd -c /etc/open5gs-cfg/nrf.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
           resources:
             requests:
               cpu: "250m"
@@ -66,6 +378,10 @@ spec:
             limits:
               cpu: "1000m"
               memory: "512Mi"
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 # 2. SCP (Service Communication Proxy)
 apiVersion: v1
@@ -105,11 +421,222 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: scpd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-scpd", "-c", "/etc/open5gs/scp.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-scpd -c /etc/open5gs-cfg/scp.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
+---
+# 2B. Cloud Firestore MongoDB Wire-Protocol Adapter (Bridges legacy libmongoc/Mongoose OP_QUERY to Firestore TLS loadBalanced=true)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open5gs-firestore-proxy-script
+  namespace: open5gs
+data:
+  proxy.js: |
+    const net = require("net");
+    const tls = require("tls");
+    const bson = require("/opt/open5gs-webui/node_modules/bson");
+
+    const rawUri = process.env.DB_URI || "";
+    const host = new URL(rawUri.replace(/^mongodb(\+srv)?:\/\//, "http://")).hostname;
+    if (!host) {
+      console.error("FATAL: Could not parse Cloud Firestore hostname from DB_URI");
+      process.exit(1);
+    }
+
+    function makeOpMsg(reqId, respTo, obj) {
+      const doc = bson.serialize(obj);
+      const h = Buffer.alloc(21);
+      h.writeInt32LE(21 + doc.length, 0);
+      h.writeInt32LE(reqId, 4);
+      h.writeInt32LE(respTo, 8);
+      h.writeInt32LE(2013, 12);
+      h.writeUInt32LE(0, 16);
+      h[20] = 0;
+      return Buffer.concat([h, doc]);
+    }
+
+    function makeOpReply(reqId, respTo, obj) {
+      const doc = bson.serialize(obj);
+      const h = Buffer.alloc(36);
+      h.writeInt32LE(36 + doc.length, 0);
+      h.writeInt32LE(reqId, 4);
+      h.writeInt32LE(respTo, 8);
+      h.writeInt32LE(1, 12);
+      h.writeInt32LE(8, 16);
+      h.writeBigInt64LE(0n, 20);
+      h.writeInt32LE(0, 28);
+      h.writeInt32LE(1, 32);
+      return Buffer.concat([h, doc]);
+    }
+
+    const server = net.createServer((client) => {
+      client.setNoDelay(true);
+      const pending = new Map();
+      const upstream = tls.connect(443, host, { servername: host });
+      upstream.setNoDelay(true);
+
+      let cBuf = Buffer.alloc(0);
+      let uBuf = Buffer.alloc(0);
+
+      client.on("data", (chunk) => {
+        cBuf = Buffer.concat([cBuf, chunk]);
+        while (cBuf.length >= 4 && cBuf.length >= cBuf.readInt32LE(0)) {
+          const len = cBuf.readInt32LE(0);
+          const frame = cBuf.slice(0, len);
+          cBuf = cBuf.slice(len);
+
+          const reqId = frame.readInt32LE(4);
+          const op = frame.readInt32LE(12);
+
+          if (op === 2004) {
+            try {
+              let off = 20;
+              while (off < frame.length && frame[off] !== 0) off++;
+              const docStart = off + 9;
+              const docLen = frame.readInt32LE(docStart);
+              const q = bson.deserialize(frame.slice(docStart, docStart + docLen));
+              const cmd = { hello: 1, loadBalanced: true, $db: "admin" };
+              if (q.saslSupportedMechs) cmd.saslSupportedMechs = q.saslSupportedMechs;
+              pending.set(reqId, "OP_QUERY");
+              upstream.write(makeOpMsg(reqId, 0, cmd));
+              continue;
+            } catch (err) {
+              // Fall through to forward unmodified if unexpected OP_QUERY
+            }
+          } else if (op === 2013 && frame[20] === 0 && frame.length >= 25) {
+            try {
+              const sec0Len = frame.readInt32LE(21);
+              if (21 + sec0Len <= frame.length) {
+                const q = bson.deserialize(frame.slice(21, 21 + sec0Len));
+                if (q.ismaster || q.isMaster || q.hello) {
+                  const cmd = { hello: 1, loadBalanced: true, $db: q.$db || "admin" };
+                  if (q.saslSupportedMechs) cmd.saslSupportedMechs = q.saslSupportedMechs;
+                  pending.set(reqId, "OP_MSG");
+                  upstream.write(makeOpMsg(reqId, 0, cmd));
+                  continue;
+                }
+              }
+            } catch (err) {
+              // Forward unmodified
+            }
+          }
+          upstream.write(frame);
+        }
+      });
+
+      upstream.on("data", (chunk) => {
+        uBuf = Buffer.concat([uBuf, chunk]);
+        while (uBuf.length >= 4 && uBuf.length >= uBuf.readInt32LE(0)) {
+          const len = uBuf.readInt32LE(0);
+          const frame = uBuf.slice(0, len);
+          uBuf = uBuf.slice(len);
+
+          const reqId = frame.readInt32LE(4);
+          const respTo = frame.readInt32LE(8);
+          const op = frame.readInt32LE(12);
+          const mode = pending.get(respTo);
+
+          if (mode && op === 2013 && frame[20] === 0) {
+            pending.delete(respTo);
+            const sec0Len = frame.readInt32LE(21);
+            const r = bson.deserialize(frame.slice(21, 21 + sec0Len), { promoteValues: false });
+            r.ismaster = true;
+            r.minWireVersion = 0;
+            r.maxWireVersion = 9;
+            delete r.serviceId;
+            client.write(mode === "OP_QUERY" ? makeOpReply(reqId, respTo, r) : makeOpMsg(reqId, respTo, r));
+          } else {
+            client.write(frame);
+          }
+        }
+      });
+
+      client.on("error", () => upstream.destroy());
+      upstream.on("error", () => client.destroy());
+      client.on("close", () => upstream.destroy());
+      upstream.on("close", () => client.destroy());
+    });
+
+    server.listen(27017, "0.0.0.0", () => {
+      console.log(`Cloud Firestore MongoDB Wire-Protocol Adapter listening on :27017 -> ${host}:443 (TLS + loadBalanced=true)`);
+    });
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open5gs-firestore-proxy
+  namespace: open5gs
+spec:
+  selector:
+    app: open5gs-firestore-proxy
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open5gs-firestore-proxy
+  namespace: open5gs
+  labels:
+    app.kubernetes.io/part-of: open5gs-5gc
+    app: open5gs-firestore-proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: open5gs-firestore-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: open5gs-5gc
+        app: open5gs-firestore-proxy
+    spec:
+      nodeSelector:
+        5g-plane: control-plane-sba
+      containers:
+        - name: proxy
+          image: docker.io/gradiant/open5gs-webui:2.7.2
+          command: ["node", "/etc/firestore-proxy/proxy.js"]
+          env:
+            - name: DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: open5gs-db-secret
+                  key: db_uri
+          ports:
+            - containerPort: 27017
+              name: mongodb
+          readinessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: proxy-script
+              mountPath: /etc/firestore-proxy
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: proxy-script
+          configMap:
+            name: open5gs-firestore-proxy-script
 ---
 # 3. UDR (Unified Data Repository - Connected to Cloud Firestore MongoDB Compat)
 apiVersion: v1
@@ -149,8 +676,17 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: udrd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-udrd", "-c", "/etc/open5gs/udr.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ulimit -n 65536
+              export DB_URI="$(printf '%s' "${DB_URI}" | sed -E 's#@[^/]+/#@open5gs-firestore-proxy.open5gs.svc.cluster.local:27017/#; s#\?.*#?authSource=admin\&authMechanism=SCRAM-SHA-256\&retryWrites=false#')"
+              printf 'db_uri: "%s"\n' "${DB_URI}" > /tmp/udr.yaml
+              cat /etc/open5gs-cfg/udr.yaml >> /tmp/udr.yaml
+              exec open5gs-udrd -c /tmp/udr.yaml
           env:
             - name: DB_URI
               valueFrom:
@@ -160,6 +696,13 @@ spec:
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 # 4. UDM (Unified Data Management) & AUSF (Authentication Server Function)
 apiVersion: v1
@@ -196,11 +739,18 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: udmd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-udmd", "-c", "/etc/open5gs/udm.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-udmd -c /etc/open5gs-cfg/udm.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 apiVersion: v1
 kind: Service
@@ -236,11 +786,18 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: ausfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-ausfd", "-c", "/etc/open5gs/ausf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-ausfd -c /etc/open5gs-cfg/ausf.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 # 5. PCF (Policy Control Function), NSSF (Slice Selection), BSF (Binding), SEPP (Roaming)
 apiVersion: v1
@@ -278,8 +835,17 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: pcfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-pcfd", "-c", "/etc/open5gs/pcf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ulimit -n 65536
+              export DB_URI="$(printf '%s' "${DB_URI}" | sed -E 's#@[^/]+/#@open5gs-firestore-proxy.open5gs.svc.cluster.local:27017/#; s#\?.*#?authSource=admin\&authMechanism=SCRAM-SHA-256\&retryWrites=false#')"
+              printf 'db_uri: "%s"\n' "${DB_URI}" > /tmp/pcf.yaml
+              cat /etc/open5gs-cfg/pcf.yaml >> /tmp/pcf.yaml
+              exec open5gs-pcfd -c /tmp/pcf.yaml
           env:
             - name: DB_URI
               valueFrom:
@@ -291,6 +857,13 @@ spec:
               name: sbi
             - containerPort: 9090
               name: metrics
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 apiVersion: v1
 kind: Service
@@ -326,11 +899,18 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: nssfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-nssfd", "-c", "/etc/open5gs/nssf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-nssfd -c /etc/open5gs-cfg/nssf.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 apiVersion: v1
 kind: Service
@@ -366,11 +946,18 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: bsfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-bsfd", "-c", "/etc/open5gs/bsf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-bsfd -c /etc/open5gs-cfg/bsf.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 apiVersion: v1
 kind: Service
@@ -410,13 +997,20 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: seppd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-seppd", "-c", "/etc/open5gs/sepp1.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-seppd -c /etc/open5gs-cfg/sepp1.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
             - containerPort: 7778
               name: n32-prins
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 # 6. AMF (Access and Mobility Management Function - Multi-NIC: eth0=SBI/N26, net1=N2 SCTP)
 apiVersion: v1
@@ -445,7 +1039,7 @@ metadata:
   namespace: open5gs
 spec:
   serviceName: open5gs-amf
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: amf
@@ -456,6 +1050,7 @@ spec:
         nf: amf
         metrics: enabled
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -466,8 +1061,8 @@ spec:
         5g-plane: multinic-dataplane
       containers:
         - name: amfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-amfd", "-c", "/etc/open5gs/amf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command: ["/bin/bash", "-c", "ulimit -n 65536 && exec open5gs-amfd -c /etc/open5gs-cfg/amf.yaml"]
           ports:
             - containerPort: 7777
               name: sbi
@@ -481,6 +1076,9 @@ spec:
             - containerPort: 9090
               name: metrics
               protocol: TCP
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
           resources:
             requests:
               cpu: "500m"
@@ -488,6 +1086,10 @@ spec:
             limits:
               cpu: "2000m"
               memory: "2Gi"
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 # 7. SMF + PGW-C (Session Management Function - Multi-NIC: eth0=SBI/S5c/Gx, net1=N4 PFCP)
 apiVersion: v1
@@ -520,7 +1122,7 @@ metadata:
   namespace: open5gs
 spec:
   serviceName: open5gs-smf
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       nf: smf
@@ -531,6 +1133,7 @@ spec:
         nf: smf
         metrics: enabled
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -541,8 +1144,18 @@ spec:
         5g-plane: multinic-dataplane
       containers:
         - name: smfd
-          image: ghcr.io/open5gs/open5gs:v2.7.2
-          command: ["open5gs-smfd", "-c", "/etc/open5gs/smf.yaml"]
+          image: docker.io/gradiant/open5gs:2.7.2
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              ulimit -n 65536
+              sed "s/__UPF_N4_ADDRESS__/${UPF_N4_ADDRESS}/g" /etc/open5gs-cfg/smf.yaml > /tmp/smf.yaml
+              exec open5gs-smfd -c /tmp/smf.yaml
+          envFrom:
+            - configMapRef:
+                name: open5gs-dataplane-endpoints
           ports:
             - containerPort: 7777
               name: sbi
@@ -553,6 +1166,9 @@ spec:
             - containerPort: 9090
               name: metrics
               protocol: TCP
+          volumeMounts:
+            - name: sba-configs
+              mountPath: /etc/open5gs-cfg
           resources:
             requests:
               cpu: "500m"
@@ -560,6 +1176,10 @@ spec:
             limits:
               cpu: "2000m"
               memory: "2Gi"
+      volumes:
+        - name: sba-configs
+          configMap:
+            name: open5gs-sba-configs
 ---
 # 8. Google Cloud Managed Service for Prometheus (GMP) Scraping CRD
 apiVersion: monitoring.googleapis.com/v1

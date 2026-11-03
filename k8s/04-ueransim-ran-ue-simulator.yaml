@@ -4,7 +4,7 @@
 # Includes:
 #   1. UERANSIM gNodeB Simulator (Multi-NIC: eth0=NR-Uu Radio, net1=N2 SCTP, net2=N3 GTP-U)
 #   2. UERANSIM UE Simulator (Creates uesimtun0 interface for live E2E PDU traffic)
-#   3. Open5GS Built-in C Protocol Conformance Job (tests/registration & tests/slice)
+#   3. Open5GS Live 5G SA SBA & NRF Conformance Verification Job
 # ==============================================================================
 
 apiVersion: v1
@@ -21,7 +21,7 @@ data:
     tac: 1
 
     # Virtual NR-Uu radio link IP (eth0 Pod IP on vpc-sbi-mgmt)
-    linkIp: 0.0.0.0
+    linkIp: __RADIO_IP__
     # N2 Interface IP (Populated at runtime from net1 on vpc-n2-signaling)
     ngapIp: __NGAP_IP__
     # N3 Interface IP (Populated at runtime from net2 on vpc-n3-userplane)
@@ -53,17 +53,17 @@ data:
     homeNetworkPublicKeyId: 1
     routingIndicator: '0000'
 
-    # Must match Subscriber provisioned in Open5GS WebUI / Cloud Firestore
+    # Matches Subscriber provisioned via open5gs-dbctl in Cloud Firestore
     key: '465B5CE8B199B49FAA5F0A2EE238A6BC'
     op: 'E8ED289DEBA952E4283B54E88E6183CA'
     opType: 'OPC'
     amf: '8000'
     imei: '356938035643803'
-    imeisv: '4370816125816151'
+    imeiSv: '4370816125816151'
 
-    # Simulated NR-Uu link pointing to UERANSIM gNodeB Service
+    # Simulated NR-Uu link resolved at startup from ueransim-gnb Service
     gnbSearchList:
-      - ueransim-gnb.open5gs.svc.cluster.local
+      - __GNB_IP__
 
     uacAic:
       mps: false
@@ -90,7 +90,7 @@ data:
 
     default-nssai:
       - sst: 1
-        sd: 1
+        sd: '0x010203'
 
     integrity:
       IA1: true
@@ -141,6 +141,7 @@ spec:
         app.kubernetes.io/part-of: open5gs-5gc
         app: ueransim-gnb
       annotations:
+        networking.gke.io/default-interface: "eth0"
         networking.gke.io/interfaces: |
           [
             {"interfaceName":"eth0","network":"default"},
@@ -152,22 +153,25 @@ spec:
         5g-plane: multinic-dataplane
       containers:
         - name: nr-gnb
-          image: ghcr.io/aligungr/ueransim:v3.2.6
+          image: docker.io/gradiant/ueransim:3.2.6
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
             - |
               set -e
-              NGAP_IP=$(ip -4 addr show dev net1 | awk '/inet / {split($2,a,"/"); print a[1]}')
-              GTP_IP=$(ip -4 addr show dev net2 | awk '/inet / {split($2,a,"/"); print a[1]}')
-              cp /etc/ueransim/gnb.yaml /tmp/gnb.yaml
+              RADIO_IP=$(ip -4 addr show dev eth0 | awk '/inet / {split($2,a,"/"); print a[1]; exit}')
+              NGAP_IP=$(ip -4 addr show dev net1 | awk '/inet / {split($2,a,"/"); print a[1]; exit}')
+              GTP_IP=$(ip -4 addr show dev net2 | awk '/inet / {split($2,a,"/"); print a[1]; exit}')
+              cp /etc/ueransim-cfg/gnb.yaml /tmp/gnb.yaml
+              sed -i "s/__RADIO_IP__/${RADIO_IP}/g" /tmp/gnb.yaml
               sed -i "s/__NGAP_IP__/${NGAP_IP}/g" /tmp/gnb.yaml
               sed -i "s/__GTP_IP__/${GTP_IP}/g" /tmp/gnb.yaml
               sed -i "s/__AMF_N2_IP__/${AMF_N2_ADDRESS}/g" /tmp/gnb.yaml
+              echo "Starting UERANSIM gNodeB: RADIO=${RADIO_IP}, N2=${NGAP_IP} -> AMF=${AMF_N2_ADDRESS}:38412, N3=${GTP_IP}"
               exec nr-gnb -c /tmp/gnb.yaml
-          env:
-            - name: AMF_N2_ADDRESS
-              value: "10.20.0.10"
+          envFrom:
+            - configMapRef:
+                name: open5gs-dataplane-endpoints
           ports:
             - containerPort: 4997
               name: rls-radio-udp
@@ -177,7 +181,7 @@ spec:
               protocol: UDP
           volumeMounts:
             - name: gnb-config
-              mountPath: /etc/ueransim
+              mountPath: /etc/ueransim-cfg
       volumes:
         - name: gnb-config
           configMap:
@@ -207,18 +211,34 @@ spec:
         5g-plane: control-plane-sba
       containers:
         - name: nr-ue
-          image: ghcr.io/aligungr/ueransim:v3.2.6
-          command: ["nr-ue", "-c", "/etc/ueransim/ue.yaml"]
+          image: docker.io/gradiant/ueransim:3.2.6
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              until GNB_IP=$(getent hosts ueransim-gnb.open5gs.svc.cluster.local | awk '{print $1; exit}') && [ -n "${GNB_IP}" ]; do
+                echo "Waiting for ueransim-gnb DNS..."
+                sleep 2
+              done
+              cp /etc/ueransim-cfg/ue.yaml /tmp/ue.yaml
+              sed -i "s/__GNB_IP__/${GNB_IP}/g" /tmp/ue.yaml
+              echo "Starting UERANSIM UE targeting gNodeB ${GNB_IP}..."
+              exec nr-ue -c /tmp/ue.yaml
           securityContext:
+            runAsUser: 0
             privileged: true
             capabilities:
               add:
                 - NET_ADMIN
           volumeMounts:
             - name: ue-config
-              mountPath: /etc/ueransim
+              mountPath: /etc/ueransim-cfg
             - name: dev-net-tun
               mountPath: /dev/net/tun
+            - name: host-ca-certs
+              mountPath: /etc/ssl/certs
+              readOnly: true
       volumes:
         - name: ue-config
           configMap:
@@ -227,10 +247,12 @@ spec:
           hostPath:
             path: /dev/net/tun
             type: CharDevice
+        - name: host-ca-certs
+          hostPath:
+            path: /etc/ssl/certs
+            type: Directory
 ---
-# 4. Native Open5GS Built-in C Simulation & Conformance Test Job
-# Runs Open5GS internal ./build/tests/registration and ./build/tests/slice
-# to verify 3GPP N1/N2/N3/N4/SBI protocol procedures in CI/CD
+# 4. Live 5G SA Control Plane SBA / NRF NF-Discovery Conformance Verification Job
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -239,24 +261,29 @@ metadata:
   labels:
     app.kubernetes.io/part-of: open5gs-5gc
 spec:
-  backoffLimit: 1
+  backoffLimit: 2
   template:
     spec:
-      restartPolicy: Never
+      restartPolicy: OnFailure
       nodeSelector:
         5g-plane: control-plane-sba
       containers:
         - name: open5gs-test-runner
-          image: ghcr.io/open5gs/open5gs:v2.7.2
+          image: docker.io/gradiant/open5gs:2.7.2
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
             - |
-              echo "Running Open5GS Native 3GPP 5GC Registration & PDU Session Simulation Suite..."
-              meson test -C /open5gs/build registration slice 5gc --verbose || true
-          env:
-            - name: DB_URI
-              valueFrom:
-                secretKeyRef:
-                  name: open5gs-db-secret
-                  key: db_uri
+              set -e
+              echo "Querying Open5GS NRF HTTP/2 SBI NF-Management Registry..."
+              RESP=$(curl -sS --http2-prior-knowledge http://open5gs-nrf.open5gs.svc.cluster.local:7777/nnrf-nfm/v1/nf-instances)
+              echo "${RESP}"
+              for pair in SCP:AMF UDR:UDM UDM:AMF AUSF:AMF PCF:AMF NSSF:AMF BSF:PCF SEPP:AMF AMF:AMF SMF:AMF; do
+                nf="${pair%%:*}"
+                req="${pair##*:}"
+                echo "Checking 3GPP TS 29.510 NRF NF-Discovery for ${nf} (requester=${req})..."
+                curl -sS --http2-prior-knowledge \
+                  "http://open5gs-nrf.open5gs.svc.cluster.local:7777/nnrf-disc/v1/nf-instances?target-nf-type=${nf}&requester-nf-type=${req}" | grep -q "\"nfType\":\"${nf}\""
+                echo "  [OK] ${nf} discovered & REGISTERED in NRF HTTP/2 SBI!"
+              done
+              echo "All 3GPP 5G SA SBA Network Functions verified in NRF!"

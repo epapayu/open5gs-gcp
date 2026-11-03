@@ -6,6 +6,7 @@
 
 # 1. Terraform State, Plans, and Sensitive Variables
 **/.terraform/*
+**/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan

@@ -1,0 +1,2 @@
+# Allow non-secret Open5GS container sample Home Network SUCI path reference in udm.yaml
+/opt/open5gs/etc/open5gs/hnet/curve25519-1\.key
